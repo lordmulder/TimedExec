@@ -1,7 +1,11 @@
 TimedExec
 =========
 
-Command-line Benchmarking Utility
+**TimedExec** is a small utility for *benchmarking* command-line programs. It will execute the specified command and measure the time it takes for that command to complete. All measurements are done via *high-resolution* performance timers. In order to obtain more accurate results, the each command will be executed *multiple* times. The number of runs can be configured as needed. TimedExec will then compute the *average* execution time, as well as the *fastest* and *slowest* execution time. Furthermore, the *standard deviation* of all runs will be computed. Last but not least, an optional number "warm-up" runs will be executed before the first measured run.
+
+
+Command-line Usage
+------------------
 
 ```
 ===========================================================================
