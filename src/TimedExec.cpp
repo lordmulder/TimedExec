@@ -66,6 +66,24 @@ static LONGLONG getTimerFrequency(void)
 	return timeValue.QuadPart;
 }
 
+static bool createProcess(_TCHAR *const commandLine, HANDLE &hThrd, HANDLE &hProc, const bool suspended = false)
+{
+	STARTUPINFO startInfo;
+	SecureZeroMemory(&startInfo, sizeof(STARTUPINFO));
+	PROCESS_INFORMATION processInfo;
+	SecureZeroMemory(&processInfo, sizeof(PROCESS_INFORMATION));
+
+	if(!CreateProcess(NULL, commandLine, NULL, NULL, false, ABOVE_NORMAL_PRIORITY_CLASS | (suspended ? CREATE_SUSPENDED : 0), NULL, NULL, &startInfo, &processInfo))
+	{
+		return false;
+	}
+
+	hThrd = processInfo.hThread;
+	hProc = processInfo.hProcess;
+
+	return true;
+}
+
 int _tmain(int argc, _TCHAR* argv[])
 {
 	std::ios initFmt(NULL);
@@ -176,18 +194,22 @@ int _tmain(int argc, _TCHAR* argv[])
 		std::cerr << "Warm-Up Loop " << (loop + 1) << " of " << warmupLoops << std::endl;
 		std::cerr << "===========================================================================\n" << std::endl;
 
-		STARTUPINFO startInfo;
-		SecureZeroMemory(&startInfo, sizeof(STARTUPINFO));
-		PROCESS_INFORMATION processInfo;
-		SecureZeroMemory(&processInfo, sizeof(PROCESS_INFORMATION));
+		HANDLE hThrd, hProc;
 
-		if(!CreateProcess(NULL, myCmd, NULL, NULL, false, ABOVE_NORMAL_PRIORITY_CLASS, NULL, NULL, &startInfo, &processInfo))
+		if(!createProcess(myCmd, hThrd, hProc))
 		{
 			std::cerr << "\nTimedExec: Failed to create process!" << std::endl;
 			return EXIT_FAILURE;
 		}
 
-		WaitForSingleObject(processInfo.hProcess, INFINITE);
+		if(WaitForSingleObject(hProc, INFINITE) != WAIT_OBJECT_0)
+		{
+			std::cerr << "\nTimedExec: Failed to wait for process termination!" << std::endl;
+			return EXIT_FAILURE;
+		}
+
+		CloseHandle(hThrd);
+		CloseHandle(hProc);
 	}
 
 	for(int loop = 0; loop < maxLoops; loop++)
@@ -196,12 +218,9 @@ int _tmain(int argc, _TCHAR* argv[])
 		std::cerr << "Exec Loop " << (loop + 1) << " of " << maxLoops << std::endl;
 		std::cerr << "===========================================================================\n" << std::endl;
 
-		STARTUPINFO startInfo;
-		SecureZeroMemory(&startInfo, sizeof(STARTUPINFO));
-		PROCESS_INFORMATION processInfo;
-		SecureZeroMemory(&processInfo, sizeof(PROCESS_INFORMATION));
+		HANDLE hThrd, hProc;
 
-		if(!CreateProcess(NULL, myCmd, NULL, NULL, false, ABOVE_NORMAL_PRIORITY_CLASS | CREATE_SUSPENDED, NULL, NULL, &startInfo, &processInfo))
+		if(!createProcess(myCmd, hThrd, hProc, true))
 		{
 			std::cerr << "\nTimedExec: Failed to create process!" << std::endl;
 			return EXIT_FAILURE;
@@ -209,13 +228,13 @@ int _tmain(int argc, _TCHAR* argv[])
 
 		const LONGLONG timeStart = getCurrentTime();
 		
-		if(ResumeThread(processInfo.hThread) == ((DWORD) -1))
+		if(ResumeThread(hThrd) == ((DWORD) -1))
 		{
 			std::cerr << "\nTimedExec: Failed to resume thread!" << std::endl;
 			return EXIT_FAILURE;
 		}
 		
-		if(WaitForSingleObject(processInfo.hProcess, INFINITE) != WAIT_OBJECT_0)
+		if(WaitForSingleObject(hProc, INFINITE) != WAIT_OBJECT_0)
 		{
 			std::cerr << "\nTimedExec: Failed to wait for process termination!" << std::endl;
 			return EXIT_FAILURE;
@@ -224,6 +243,9 @@ int _tmain(int argc, _TCHAR* argv[])
 		const LONGLONG timeFinish = getCurrentTime();
 		const double execTime = static_cast<double>(timeFinish - timeStart) / static_cast<double>(timerFrequency);
 		singleResults[loop] = execTime;
+
+		CloseHandle(hThrd);
+		CloseHandle(hProc);
 
 		std::cerr << std::setprecision(3) << std::fixed;
 		std::cerr << "\nTimedExec: Execution took " << execTime << " seconds.\n" << std::endl;
@@ -245,6 +267,7 @@ int _tmain(int argc, _TCHAR* argv[])
 
 	std::cerr << std::setprecision(3) << std::fixed;
 	std::cerr << "\n===========================================================================" << std::endl;
+	std::cerr << "TEST COMPLETED SUCCESSFULLY." << std::endl;
 	std::cerr << "Average execution time after " << maxLoops << " runs was " << meanResult << " seconds." << std::endl;
 	std::cerr << "Fastest / slowest execution time was " << fastestResult << " / " << slowestResult << " seconds." << std::endl;
 	std::cerr << "Standard deviation was: " << standardDeviation << " seconds." << std::endl;
