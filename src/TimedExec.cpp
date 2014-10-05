@@ -38,6 +38,33 @@
 #define EXEC_LOOPS   5
 #define WARMUP_LOOPS 1
 
+static bool getEnvVariable(const _TCHAR *const name, _TCHAR *const buffer, size_t buffSize)
+{
+	const DWORD ret = GetEnvironmentVariable(name, buffer, buffSize);
+	return ((ret > 0) && (ret < buffSize));
+}
+
+static LONGLONG getCurrentTime(void)
+{
+	LARGE_INTEGER timeValue;
+	if(!QueryPerformanceCounter(&timeValue))
+	{
+		std::cerr << "\nTimedExec: Failed to query performance counter!\n" << std::endl;
+		exit(EXIT_FAILURE);
+	}
+	return timeValue.QuadPart;
+}
+
+static LONGLONG getTimerFrequency(void)
+{
+	LARGE_INTEGER timeValue;
+	if(!QueryPerformanceFrequency(&timeValue))
+	{
+		std::cerr << "\nTimedExec: Failed to query performance counter!\n" << std::endl;
+		exit(EXIT_FAILURE);
+	}
+	return timeValue.QuadPart;
+}
 
 int _tmain(int argc, _TCHAR* argv[])
 {
@@ -71,7 +98,7 @@ int _tmain(int argc, _TCHAR* argv[])
 	if(szArglist == NULL)
 	{
 		std::cerr << std::endl << "Internal error: Initialization failed!" << std::endl;
-		return -1;
+		return EXIT_FAILURE;
 	}
 
 	if(nArgs < 2)
@@ -82,7 +109,7 @@ int _tmain(int argc, _TCHAR* argv[])
 		std::cerr << "  TIMED_EXEC_LOGFILE - Log File (default: \"" << LOG_FILE << "\")" << std::endl;
 		std::cerr << "  TIMED_EXEC_LOOPS   - Number of execution loops (default: " << EXEC_LOOPS << ")" << std::endl;
 		std::cerr << "  TIMED_WARMUP_LOOPS - Number of warm-up loops (default: " << WARMUP_LOOPS << ")\n" << std::endl;
-		return 1;
+		return EXIT_FAILURE;
 	}
 
 	for(int i = 1; i < nArgs; i++)
@@ -108,17 +135,17 @@ int _tmain(int argc, _TCHAR* argv[])
 	TCHAR *logFile = NULL;
 	int maxLoops = EXEC_LOOPS, warmupLoops = WARMUP_LOOPS;
 	
-	if(GetEnvironmentVariable(_T("TIMED_EXEC_LOOPS"), temp, len))
+	if(getEnvVariable(_T("TIMED_EXEC_LOOPS"), temp, len))
 	{
 		int maxLoops = std::max(1, _tstoi(temp));
 	}
 	
-	if(GetEnvironmentVariable(_T("TIMED_WARMUP_LOOPS"), temp, len))
+	if(getEnvVariable(_T("TIMED_WARMUP_LOOPS"), temp, len))
 	{
 		int warmupLoops = std::max(0, _tstoi(temp));
 	}
 
-	if(GetEnvironmentVariable(_T("TIMED_EXEC_LOGFILE"), temp, len))
+	if(getEnvVariable(_T("TIMED_EXEC_LOGFILE"), temp, len))
 	{
 		logFile = _tcsdup(temp);
 	}
@@ -131,9 +158,8 @@ int _tmain(int argc, _TCHAR* argv[])
 
 	_ftprintf(stderr, _T("Command-line:\n%s\n\n"), myCmd);
 
-	LARGE_INTEGER startTime, finishTime, frequency;
+	const LONGLONG timerFrequency = getTimerFrequency();
 	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
-	QueryPerformanceFrequency(&frequency);
 
 	double *singleResults = new double[maxLoops];
 	memset(singleResults, 0, sizeof(double) * maxLoops);
@@ -158,7 +184,7 @@ int _tmain(int argc, _TCHAR* argv[])
 		if(!CreateProcess(NULL, myCmd, NULL, NULL, false, ABOVE_NORMAL_PRIORITY_CLASS, NULL, NULL, &startInfo, &processInfo))
 		{
 			std::cerr << "\nTimedExec: Failed to create process!" << std::endl;
-			return -2;
+			return EXIT_FAILURE;
 		}
 
 		WaitForSingleObject(processInfo.hProcess, INFINITE);
@@ -178,15 +204,25 @@ int _tmain(int argc, _TCHAR* argv[])
 		if(!CreateProcess(NULL, myCmd, NULL, NULL, false, ABOVE_NORMAL_PRIORITY_CLASS | CREATE_SUSPENDED, NULL, NULL, &startInfo, &processInfo))
 		{
 			std::cerr << "\nTimedExec: Failed to create process!" << std::endl;
-			return -2;
+			return EXIT_FAILURE;
 		}
 
-		QueryPerformanceCounter(&startTime);
-		ResumeThread(processInfo.hThread);
-		WaitForSingleObject(processInfo.hProcess, INFINITE);
-		QueryPerformanceCounter(&finishTime);
+		const LONGLONG timeStart = getCurrentTime();
 		
-		const double execTime = static_cast<double>(finishTime.QuadPart - startTime.QuadPart) / static_cast<double>(frequency.QuadPart);
+		if(ResumeThread(processInfo.hThread) == ((DWORD) -1))
+		{
+			std::cerr << "\nTimedExec: Failed to resume thread!" << std::endl;
+			return EXIT_FAILURE;
+		}
+		
+		if(WaitForSingleObject(processInfo.hProcess, INFINITE) != WAIT_OBJECT_0)
+		{
+			std::cerr << "\nTimedExec: Failed to wait for process termination!" << std::endl;
+			return EXIT_FAILURE;
+		}
+
+		const LONGLONG timeFinish = getCurrentTime();
+		const double execTime = static_cast<double>(timeFinish - timeStart) / static_cast<double>(timerFrequency);
 		singleResults[loop] = execTime;
 
 		std::cerr << std::setprecision(3) << std::fixed;
@@ -219,10 +255,14 @@ int _tmain(int argc, _TCHAR* argv[])
 	if(_tfopen_s(&fLog, logFile, _T("a+")) == 0)
 	{
 		_tcsncpy_s(temp, len, szArglist[1], _TRUNCATE);
-		TCHAR *ctx;
-		TCHAR *exeName = _tcstok_s(temp, _T(":/\\"), &ctx);
+		TCHAR *ctx, *exeName = _tcstok_s(temp, _T(":/\\"), &ctx);
 		while(TCHAR *tok = _tcstok_s(NULL, _T(":/\\"), &ctx)) exeName = tok;
 		_ftprintf_s(fLog, _T("%s\t%d\t%f\t%f\t%f\t%f\t%s\n"), exeName, maxLoops, meanResult, fastestResult, slowestResult, standardDeviation, myCmd);
+		fclose(fLog); fLog = NULL;
+	}
+	else
+	{
+		std::cerr << "Error: Failed to append results to log file!\n" << std::endl;
 	}
 
 	/* ---------------------------------------------------------- */
@@ -234,6 +274,6 @@ int _tmain(int argc, _TCHAR* argv[])
 	LocalFree(szArglist);
 	if(logFile) free(logFile);
 
-	return 0;
+	return EXIT_SUCCESS;
 }
 
