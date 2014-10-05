@@ -1,0 +1,12 @@
+/tmp/
+/obj/
+/bin/
+/out/
+/ipch/
+*.sdf
+*.suo
+*.user
+*.opensdf
+*.old
+*.db
+*.local.*
