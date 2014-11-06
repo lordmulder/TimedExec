@@ -24,6 +24,7 @@
 #include <iostream>
 #include <iomanip>
 #include <tchar.h>
+#include <sys/stat.h>
 
 #define NOMINMAX 1
 #define WIN32_LEAN_AND_MEAN 1
@@ -31,12 +32,19 @@
 #include <ShellAPI.h>
 
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 2
+#define VERSION_MINOR 3
 
 #define LOG_FILE "TimedExec.log"
 
-#define EXEC_LOOPS   5
-#define WARMUP_LOOPS 1
+#define EXEC_LOOPS   10
+#define WARMUP_LOOPS 3
+
+static HANDLE g_hAbortEvent = NULL;
+static volatile bool g_aborted = false;
+
+// =============================================================================================================
+// INTERNAL FUNCTIONS
+// =============================================================================================================
 
 static bool getEnvVariable(const _TCHAR *const name, _TCHAR *const buffer, size_t buffSize)
 {
@@ -73,7 +81,7 @@ static bool createProcess(_TCHAR *const commandLine, HANDLE &hThrd, HANDLE &hPro
 	PROCESS_INFORMATION processInfo;
 	SecureZeroMemory(&processInfo, sizeof(PROCESS_INFORMATION));
 
-	if(!CreateProcess(NULL, commandLine, NULL, NULL, false, ABOVE_NORMAL_PRIORITY_CLASS | (suspended ? CREATE_SUSPENDED : 0), NULL, NULL, &startInfo, &processInfo))
+	if(!CreateProcess(NULL, commandLine, NULL, NULL, false, HIGH_PRIORITY_CLASS | (suspended ? CREATE_SUSPENDED : 0), NULL, NULL, &startInfo, &processInfo))
 	{
 		return false;
 	}
@@ -84,8 +92,49 @@ static bool createProcess(_TCHAR *const commandLine, HANDLE &hThrd, HANDLE &hPro
 	return true;
 }
 
+static void abortedHandlerRoutine(const HANDLE &hProc)
+{
+	TerminateProcess(hProc, UINT(-1));
+	WaitForSingleObject(hProc, INFINITE);
+	std::cerr << std::endl;
+	std::cerr << "\n===========================================================================" << std::endl;
+	std::cerr << "ABORTED BY USER !!!" << std::endl;
+	std::cerr << "===========================================================================\n" << std::endl;
+}
+
+static BOOL WINAPI ctrlHandlerRoutine(DWORD dwCtrlType)
+{
+	g_aborted = true;
+	SetEvent(g_hAbortEvent);
+	return TRUE;
+}
+
+static LONG WINAPI crashHandlerRoutine(struct _EXCEPTION_POINTERS *ExceptionInfo)
+{
+	static const char *const message = "\n\nUNHANDELED EXCEPTION ERROR !!!\n\n";
+	DWORD bytesWritten;
+	WriteFile(GetStdHandle(STD_ERROR_HANDLE), message, strlen(message), &bytesWritten, NULL);
+	TerminateProcess(GetCurrentProcess(), UINT(-1));
+	return EXCEPTION_EXECUTE_HANDLER;
+}
+
+// =============================================================================================================
+// MAIN FUNCTION
+// =============================================================================================================
+
 int _tmain(int argc, _TCHAR* argv[])
 {
+	SetUnhandledExceptionFilter(crashHandlerRoutine);
+	SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+
+	if(!(g_hAbortEvent = CreateEvent(NULL, TRUE, FALSE, NULL)))
+	{
+		std::cerr << "\nSYSTEM ERROR: Event object could not be created!\n" << std::endl;
+		return EXIT_FAILURE;
+	}
+	
+	SetConsoleCtrlHandler(ctrlHandlerRoutine, TRUE);
+
 	std::ios initFmt(NULL);
 	initFmt.copyfmt(std::cerr);
 
@@ -99,6 +148,10 @@ int _tmain(int argc, _TCHAR* argv[])
 
 	std::cerr.copyfmt(initFmt);
 
+	/* ---------------------------------------------------------- */
+	/* Check Command-Line                                         */
+	/* ---------------------------------------------------------- */
+
 	TCHAR *fullCmd = GetCommandLine();
 	int len = std::max(_tcslen(fullCmd) + 1U, 4096U);
 
@@ -107,8 +160,6 @@ int _tmain(int argc, _TCHAR* argv[])
 		
 	memset(myCmd, 0, sizeof(TCHAR) * len);
 	memset(temp, 0, sizeof(TCHAR) * len);
-
-	/* ---------------------------------------------------------- */
 	
 	int nArgs = 0;
 	TCHAR **szArglist = CommandLineToArgvW(fullCmd, &nArgs);
@@ -124,9 +175,9 @@ int _tmain(int argc, _TCHAR* argv[])
 		std::cerr << "Usage:" << std::endl;
 		std::cerr << "  TimedExec.exe <Program.exe> [Arguments]\n" << std::endl;
 		std::cerr << "Influential environment variables:" << std::endl;
-		std::cerr << "  TIMED_EXEC_LOGFILE - Log File (default: \"" << LOG_FILE << "\")" << std::endl;
-		std::cerr << "  TIMED_EXEC_LOOPS   - Number of execution loops (default: " << EXEC_LOOPS << ")" << std::endl;
-		std::cerr << "  TIMED_WARMUP_LOOPS - Number of warm-up loops (default: " << WARMUP_LOOPS << ")\n" << std::endl;
+		std::cerr << "  TIMED_EXEC_LOGFILE  - Log File (default: \"" << LOG_FILE << "\")" << std::endl;
+		std::cerr << "  TIMED_EXEC_PASSES   - Number of execution passes (default: " << EXEC_LOOPS << ")" << std::endl;
+		std::cerr << "  TIMED_WARMUP_PASSES - Number of warm-up passes (default: " << WARMUP_LOOPS << ")\n" << std::endl;
 		return EXIT_FAILURE;
 	}
 
@@ -149,18 +200,20 @@ int _tmain(int argc, _TCHAR* argv[])
 	}
 		
 	/* ---------------------------------------------------------- */
+	/* Check Environment Variables                                */
+	/* ---------------------------------------------------------- */
 
 	TCHAR *logFile = NULL;
 	int maxLoops = EXEC_LOOPS, warmupLoops = WARMUP_LOOPS;
 	
-	if(getEnvVariable(_T("TIMED_EXEC_LOOPS"), temp, len))
+	if(getEnvVariable(_T("TIMED_EXEC_PASSES"), temp, len))
 	{
-		int maxLoops = std::max(1, _tstoi(temp));
+		maxLoops = std::max(1, _tstoi(temp));
 	}
 	
-	if(getEnvVariable(_T("TIMED_WARMUP_LOOPS"), temp, len))
+	if(getEnvVariable(_T("TIMED_WARMUP_PASSES"), temp, len))
 	{
-		int warmupLoops = std::max(0, _tstoi(temp));
+		warmupLoops = std::max(0, _tstoi(temp));
 	}
 
 	if(getEnvVariable(_T("TIMED_EXEC_LOGFILE"), temp, len))
@@ -173,11 +226,19 @@ int _tmain(int argc, _TCHAR* argv[])
 	}
 
 	/* ---------------------------------------------------------- */
+	/* Initialization                                             */
+	/* ---------------------------------------------------------- */
 
-	_ftprintf(stderr, _T("Command-line:\n%s\n\n"), myCmd);
+	_ftprintf(stderr, _T("Command-line:\n%s\n"), myCmd);
 
 	const LONGLONG timerFrequency = getTimerFrequency();
-	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
+	if(!SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS))
+	{
+		if(!SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS))
+		{
+			std::cerr << "\nWARNING: Failed to set process priroity class!" << std::endl;
+		}
+	}
 
 	double *singleResults = new double[maxLoops];
 	memset(singleResults, 0, sizeof(double) * maxLoops);
@@ -188,10 +249,14 @@ int _tmain(int argc, _TCHAR* argv[])
 	double meanResult = 0.0;
 	double variance = 0.0;
 
+	/* ---------------------------------------------------------- */
+	/* Run Warm-Up Passes                                         */
+	/* ---------------------------------------------------------- */
+
 	for(int loop = 0; loop < warmupLoops; loop++)
 	{
 		std::cerr << "\n===========================================================================" << std::endl;
-		std::cerr << "Warm-Up Loop " << (loop + 1) << " of " << warmupLoops << std::endl;
+		std::cerr << "WARM-UP PASS " << (loop + 1) << " OF " << warmupLoops << std::endl;
 		std::cerr << "===========================================================================\n" << std::endl;
 
 		HANDLE hThrd, hProc;
@@ -202,9 +267,17 @@ int _tmain(int argc, _TCHAR* argv[])
 			return EXIT_FAILURE;
 		}
 
-		if(WaitForSingleObject(hProc, INFINITE) != WAIT_OBJECT_0)
+		HANDLE waitHandles[2] = {hProc, g_hAbortEvent};
+		const DWORD ret = WaitForMultipleObjects(2, &waitHandles[0], FALSE, INFINITE);
+		if((ret != WAIT_OBJECT_0) && (ret != WAIT_OBJECT_0 + 1))
 		{
 			std::cerr << "\nTimedExec: Failed to wait for process termination!" << std::endl;
+			return EXIT_FAILURE;
+		}
+
+		if(g_aborted)
+		{
+			abortedHandlerRoutine(hProc);
 			return EXIT_FAILURE;
 		}
 
@@ -212,10 +285,14 @@ int _tmain(int argc, _TCHAR* argv[])
 		CloseHandle(hProc);
 	}
 
+	/* ---------------------------------------------------------- */
+	/* Run Execution Passes                                       */
+	/* ---------------------------------------------------------- */
+
 	for(int loop = 0; loop < maxLoops; loop++)
 	{
 		std::cerr << "\n===========================================================================" << std::endl;
-		std::cerr << "Exec Loop " << (loop + 1) << " of " << maxLoops << std::endl;
+		std::cerr << "EXECUTION PASS " << (loop + 1) << " OF " << maxLoops << std::endl;
 		std::cerr << "===========================================================================\n" << std::endl;
 
 		HANDLE hThrd, hProc;
@@ -234,7 +311,9 @@ int _tmain(int argc, _TCHAR* argv[])
 			return EXIT_FAILURE;
 		}
 		
-		if(WaitForSingleObject(hProc, INFINITE) != WAIT_OBJECT_0)
+		HANDLE waitHandles[2] = {hProc, g_hAbortEvent};
+		const DWORD ret = WaitForMultipleObjects(2, &waitHandles[0], FALSE, INFINITE);
+		if((ret != WAIT_OBJECT_0) && (ret != WAIT_OBJECT_0 + 1))
 		{
 			std::cerr << "\nTimedExec: Failed to wait for process termination!" << std::endl;
 			return EXIT_FAILURE;
@@ -244,11 +323,17 @@ int _tmain(int argc, _TCHAR* argv[])
 		const double execTime = static_cast<double>(timeFinish - timeStart) / static_cast<double>(timerFrequency);
 		singleResults[loop] = execTime;
 
+		if(g_aborted)
+		{
+			abortedHandlerRoutine(hProc);
+			return EXIT_FAILURE;
+		}
+
 		CloseHandle(hThrd);
 		CloseHandle(hProc);
 
 		std::cerr << std::setprecision(3) << std::fixed;
-		std::cerr << "\nTimedExec: Execution took " << execTime << " seconds.\n" << std::endl;
+		std::cerr << "\nTimedExec: Execution took " << execTime << " seconds." << std::endl;
 		std::cerr.copyfmt(initFmt);
 
 		if(execTime > slowestResult) slowestResult = execTime;
@@ -262,25 +347,46 @@ int _tmain(int argc, _TCHAR* argv[])
 	variance /= double(maxLoops - 1);
 
 	/* ---------------------------------------------------------- */
+	/* Print Results                                              */
+	/* ---------------------------------------------------------- */
 
 	const double standardDeviation = sqrt(variance);
+	const double confidenceInter90 = 1.645 * standardDeviation;
+	const double confidenceInter95 = 1.960 * standardDeviation;
+	const double confidenceInter99 = 2.576 * standardDeviation;
 
 	std::cerr << std::setprecision(3) << std::fixed;
 	std::cerr << "\n===========================================================================" << std::endl;
-	std::cerr << "TEST COMPLETED SUCCESSFULLY." << std::endl;
-	std::cerr << "Average execution time after " << maxLoops << " runs was " << meanResult << " seconds." << std::endl;
-	std::cerr << "Fastest / slowest execution time was " << fastestResult << " / " << slowestResult << " seconds." << std::endl;
-	std::cerr << "Standard deviation was: " << standardDeviation << " seconds." << std::endl;
+	std::cerr << "TEST COMPLETED SUCCESSFULLY AFTER " << maxLoops << " EXECUTION PASSES" << std::endl;
+	std::cerr << "---------------------------------------------------------------------------" << std::endl;
+	std::cerr << "Mean Execution Time     : " << meanResult << " seconds" << std::endl;
+	std::cerr << "90% Confidence Interval : " << "+/- " << confidenceInter90 << " seconds (" << 100.0 * (confidenceInter90 / meanResult) << " %)" << std::endl;
+	std::cerr << "95% Confidence Interval : " << "+/- " << confidenceInter95 << " seconds (" << 100.0 * (confidenceInter95 / meanResult) << " %)" << std::endl;
+	std::cerr << "99% Confidence Interval : " << "+/- " << confidenceInter99 << " seconds (" << 100.0 * (confidenceInter99 / meanResult) << " %)" << std::endl;
+	std::cerr << "Standard Deviation      : " << standardDeviation << " seconds" << std::endl;
+	std::cerr << "Fastest / Slowest Pass  : " << fastestResult << " / " << slowestResult << " seconds" << std::endl;
 	std::cerr << "===========================================================================\n" << std::endl;
 	std::cerr.copyfmt(initFmt);
+
+	/* ---------------------------------------------------------- */
+	/* Write Log-File                                             */
+	/* ---------------------------------------------------------- */
 
 	FILE *fLog = NULL;
 	if(_tfopen_s(&fLog, logFile, _T("a+")) == 0)
 	{
+		struct _stati64 stats;
+		if(_fstati64(_fileno(fLog), &stats) == 0)
+		{
+			if(stats.st_size == 0)
+			{
+				_ftprintf_s(fLog, _T("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n"), _T("Program"), _T("Passes"), _T("Mean Time"), _T("90% ConfInt"), _T("95% ConfInt"), _T("99% ConfInt"), _T("Fastest"), _T("Slowest"), _T("StdDev"), _T("Command"));
+			}
+		}
 		_tcsncpy_s(temp, len, szArglist[1], _TRUNCATE);
 		TCHAR *ctx, *exeName = _tcstok_s(temp, _T(":/\\"), &ctx);
 		while(TCHAR *tok = _tcstok_s(NULL, _T(":/\\"), &ctx)) exeName = tok;
-		_ftprintf_s(fLog, _T("%s\t%d\t%f\t%f\t%f\t%f\t%s\n"), exeName, maxLoops, meanResult, fastestResult, slowestResult, standardDeviation, myCmd);
+		_ftprintf_s(fLog, _T("%s\t%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%s\n"), exeName, maxLoops, meanResult, confidenceInter90, confidenceInter95, confidenceInter99, fastestResult, slowestResult, standardDeviation, myCmd);
 		fclose(fLog); fLog = NULL;
 	}
 	else
@@ -288,6 +394,8 @@ int _tmain(int argc, _TCHAR* argv[])
 		std::cerr << "Error: Failed to append results to log file!\n" << std::endl;
 	}
 
+	/* ---------------------------------------------------------- */
+	/* Final Clean-up                                             */
 	/* ---------------------------------------------------------- */
 
 	delete [] myCmd;
