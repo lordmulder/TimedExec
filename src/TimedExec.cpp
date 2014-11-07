@@ -34,10 +34,16 @@
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 3
 
-#define EXEC_LOOPS   10
-#define WARMUP_LOOPS 3
+#define DEFAULT_EXEC_LOOPS 10
+#define DEFAULT_WARMUP_LOOPS 3
+#define DEFAULT_LOGFILE _T("TimedExec.log")
+#define ENABLE_ENV_VARS true
 
-#define LOG_FILE _T("TimedExec.log")
+#ifdef _UNICODE
+#define tstring std::wstring
+#else
+#define tstring std::string
+#endif
 
 static HANDLE g_hAbortEvent = NULL;
 static volatile bool g_aborted = false;
@@ -46,10 +52,20 @@ static volatile bool g_aborted = false;
 // INTERNAL FUNCTIONS
 // =============================================================================================================
 
-static bool getEnvVariable(const _TCHAR *const name, _TCHAR *const buffer, size_t buffSize)
+static bool getEnvVariable(const _TCHAR *const name, tstring &value)
 {
-	const DWORD ret = GetEnvironmentVariable(name, buffer, buffSize);
-	return ((ret > 0) && (ret < buffSize));
+	const size_t BUFF_SIZE = 512;
+	_TCHAR buffer[BUFF_SIZE];
+
+	const DWORD ret = GetEnvironmentVariable(name, buffer, BUFF_SIZE);
+	if((ret > 0) && (ret < BUFF_SIZE))
+	{
+		value = buffer;
+		return true;
+	}
+
+	value.clear();
+	return false;
 }
 
 static LONGLONG getCurrentTime(void)
@@ -57,8 +73,8 @@ static LONGLONG getCurrentTime(void)
 	LARGE_INTEGER timeValue;
 	if(!QueryPerformanceCounter(&timeValue))
 	{
-		std::cerr << "\nTimedExec: Failed to query performance counter!\n" << std::endl;
-		exit(EXIT_FAILURE);
+		std::cerr << "\n\nSYSTEM ERROR: Failed to query performance counter!\n" << std::endl;
+		_exit(EXIT_FAILURE);
 	}
 	return timeValue.QuadPart;
 }
@@ -68,20 +84,110 @@ static LONGLONG getTimerFrequency(void)
 	LARGE_INTEGER timeValue;
 	if(!QueryPerformanceFrequency(&timeValue))
 	{
-		std::cerr << "\nTimedExec: Failed to query performance counter!\n" << std::endl;
-		exit(EXIT_FAILURE);
+		std::cerr << "\n\nSYSTEM ERROR: Failed to query performance counter frequency!\n" << std::endl;
+		_exit(EXIT_FAILURE);
 	}
 	return timeValue.QuadPart;
 }
 
-static bool createProcess(_TCHAR *const commandLine, HANDLE &hThrd, HANDLE &hProc, const bool suspended = false)
+
+static long long getCurrentFileSize(FILE *const filePtr)
+{
+	struct _stati64 stats;
+	if(_fstati64(_fileno(filePtr), &stats) == 0)
+	{
+		return stats.st_size;
+	}
+	return -1;
+}
+
+static bool checkBinary(const tstring &filePath)
+{
+	DWORD binaryType;
+	return GetBinaryType(filePath.c_str(), &binaryType) ? true : false;
+}
+
+static tstring getFullPath(const _TCHAR *const fileName)
+{
+	const size_t BUFF_SIZE = 512;
+	_TCHAR buffer[BUFF_SIZE];
+
+	const DWORD ret = GetFullPathName(fileName, BUFF_SIZE, buffer, NULL);
+	if((ret > 0) && (ret < BUFF_SIZE))
+	{
+		return tstring(buffer);
+	}
+
+	return tstring(fileName);
+}
+
+static int initializeCommandLine(tstring &commandLine, tstring &programFile)
+{
+	commandLine.clear();
+	programFile.clear();
+
+	int nArgs = 0;
+	TCHAR **szArglist = CommandLineToArgvW(GetCommandLine(), &nArgs);
+
+	if((szArglist == NULL) || (nArgs < 2))
+	{
+		return 0;
+	}
+
+	for(int i = 1; i < nArgs; i++)
+	{
+		tstring token;
+
+		if(i > 1)
+		{
+			token = tstring(szArglist[i]);
+			commandLine += _T(' ');
+		}
+		else
+		{
+			token = getFullPath(szArglist[i]);
+			programFile += token;
+		}
+
+		if(token.find(' ') == tstring::npos)
+		{
+			commandLine += token;
+		}
+		else
+		{
+			commandLine += _T('"');
+			commandLine += token;
+			commandLine += _T('"');
+		}
+	}
+
+	LocalFree(szArglist);
+	return nArgs;
+}
+
+static tstring getFileNameOnly(const tstring &filePath)
+{
+	tstring result(filePath);
+	static _TCHAR *FILTER = _T(":?*/\\<>|");
+	for(size_t i = 0; FILTER[i]; i++)
+	{
+		size_t pos;
+		if((pos = result.rfind(FILTER[i])) != tstring::npos)
+		{
+			result.erase(0, pos);
+		}
+	}
+	return result;
+}
+
+static bool createProcess(const tstring &commandLine, HANDLE &hThrd, HANDLE &hProc, const bool suspended = false)
 {
 	STARTUPINFO startInfo;
 	SecureZeroMemory(&startInfo, sizeof(STARTUPINFO));
 	PROCESS_INFORMATION processInfo;
 	SecureZeroMemory(&processInfo, sizeof(PROCESS_INFORMATION));
 
-	if(!CreateProcess(NULL, commandLine, NULL, NULL, false, HIGH_PRIORITY_CLASS | (suspended ? CREATE_SUSPENDED : 0), NULL, NULL, &startInfo, &processInfo))
+	if(!CreateProcess(NULL, (LPTSTR)commandLine.c_str(), NULL, NULL, false, HIGH_PRIORITY_CLASS | (suspended ? CREATE_SUSPENDED : 0), NULL, NULL, &startInfo, &processInfo))
 	{
 		return false;
 	}
@@ -165,76 +271,61 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	/* Check Command-Line                                         */
 	/* ---------------------------------------------------------- */
 
-	TCHAR *fullCommandLine = GetCommandLine();
-	
-	int nArgs = 0;
-	TCHAR **szArglist = CommandLineToArgvW(fullCommandLine, &nArgs);
-
-	if(szArglist == NULL)
-	{
-		std::cerr << std::endl << "Internal error: Initialization failed!" << std::endl;
-		return EXIT_FAILURE;
-	}
-
-	if(nArgs < 2)
+	tstring commandLine, programFile;
+	if(initializeCommandLine(commandLine, programFile) < 2)
 	{
 		std::cerr << "Usage:" << std::endl;
 		std::cerr << "  TimedExec.exe <Program.exe> [Arguments]\n" << std::endl;
 		std::cerr << "Influential environment variables:" << std::endl;
-		std::cerr << "  TIMED_EXEC_LOGFILE  - Log File (default: \"" << LOG_FILE << "\")" << std::endl;
-		std::cerr << "  TIMED_EXEC_PASSES   - Number of execution passes (default: " << EXEC_LOOPS << ")" << std::endl;
-		std::cerr << "  TIMED_WARMUP_PASSES - Number of warm-up passes (default: " << WARMUP_LOOPS << ")\n" << std::endl;
+		std::cerr << "  TIMED_EXEC_LOGFILE  - Log File (default: \"" << DEFAULT_LOGFILE << "\")" << std::endl;
+		std::cerr << "  TIMED_EXEC_PASSES   - Number of execution passes (default: " << DEFAULT_EXEC_LOOPS << ")" << std::endl;
+		std::cerr << "  TIMED_WARMUP_PASSES - Number of warm-up passes (default: " << DEFAULT_WARMUP_LOOPS << ")\n" << std::endl;
 		return EXIT_FAILURE;
 	}
 
-	int len = std::max(_tcslen(fullCommandLine) + 1U, 4096U);
-	TCHAR *myCommandLine = (TCHAR*) _alloca(sizeof(TCHAR) * len);
-	myCommandLine[0] = _T('\0');
-
-	for(int i = 1; i < nArgs; i++)
+	if(_taccess(programFile.c_str(), 0) != 0)
 	{
-		if(i > 1)
-		{
-			_tcsncat_s(myCommandLine, len, _T(" "), _TRUNCATE);
-		}
-		if(_tcschr(szArglist[i], _T(' ')) == NULL)
-		{
-			_tcsncat_s(myCommandLine, len, szArglist[i], _TRUNCATE);
-		}
-		else
-		{
-			_tcsncat_s(myCommandLine, len, _T("\""), _TRUNCATE);
-			_tcsncat_s(myCommandLine, len, szArglist[i], _TRUNCATE);
-			_tcsncat_s(myCommandLine, len, _T("\""), _TRUNCATE);
-		}
+		_ftprintf(stderr, _T("Specified program file could not be found or access denied:\n%s\n\n"), programFile.c_str());
+		return EXIT_FAILURE;
 	}
-		
+
+	if(!checkBinary(programFile))
+	{
+		_ftprintf(stderr, _T("Specified file does not look like a valid Win32 executable:\n%s\n\n"), programFile.c_str());
+		return EXIT_FAILURE;
+	}
+
 	/* ---------------------------------------------------------- */
 	/* Check Environment Variables                                */
 	/* ---------------------------------------------------------- */
 
-	TCHAR temp[MAX_PATH], logFile[MAX_PATH];
-	int maxLoops = EXEC_LOOPS, warmupLoops = WARMUP_LOOPS;
-	_tcsncpy_s(logFile, MAX_PATH, LOG_FILE, _TRUNCATE);
+	tstring logFile(DEFAULT_LOGFILE);
+	int maxPasses = DEFAULT_EXEC_LOOPS, maxWarmUpPasses = DEFAULT_WARMUP_LOOPS;
 	
-	if(getEnvVariable(_T("TIMED_EXEC_PASSES"), temp, MAX_PATH))
+	if(ENABLE_ENV_VARS)
 	{
-		maxLoops = std::max(3, _tstoi(temp));
-	}
-	if(getEnvVariable(_T("TIMED_WARMUP_PASSES"), temp, MAX_PATH))
-	{
-		warmupLoops = std::max(0, _tstoi(temp));
-	}
-	if(getEnvVariable(_T("TIMED_EXEC_LOGFILE"), temp, MAX_PATH))
-	{
-		_tcsncpy_s(logFile, MAX_PATH, temp, _TRUNCATE);
+		tstring temp;
+		if(getEnvVariable(_T("TIMED_EXEC_PASSES"), temp))
+		{
+			maxPasses = std::max(3, _tstoi(temp.c_str()));
+		}
+		if(getEnvVariable(_T("TIMED_WARMUP_PASSES"), temp))
+		{
+			maxWarmUpPasses = std::max(0, _tstoi(temp.c_str()));
+		}
+		if(getEnvVariable(_T("TIMED_EXEC_LOGFILE"), temp))
+		{
+			logFile.swap(temp);
+		}
 	}
 
 	/* ---------------------------------------------------------- */
 	/* Initialization                                             */
 	/* ---------------------------------------------------------- */
 
-	_ftprintf(stderr, _T("Command-line:\n%s\n"), myCommandLine);
+	_ftprintf(stderr, _T("Command-line:\n%s\n\n"), commandLine.c_str());
+	_ftprintf(stderr, _T("Log File:\n%s\n\n"), logFile.c_str());
+	std::cerr << "Number of Warm-Up/Metering passes: " << maxPasses << "x / " << maxWarmUpPasses << 'x' << std::endl;
 
 	const LONGLONG timerFrequency = getTimerFrequency();
 	if(!SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS))
@@ -245,33 +336,32 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 		}
 	}
 
-	double slowestResult = 0.0;
-	double fastestResult = DBL_MAX;
-
-	double meanResult = 0.0;
-	double variance = 0.0;
+	double stats_mean     = 0.0;
+	double stats_variance = 0.0;
+	double stats_fastest  = DBL_MAX;
+	double stats_slowest  = 0.0;
 
 	/* ---------------------------------------------------------- */
 	/* Run Warm-Up Passes                                         */
 	/* ---------------------------------------------------------- */
 
-	for(int loop = 0; loop < warmupLoops; loop++)
+	for(int pass = 0; pass < maxWarmUpPasses; pass++)
 	{
 		std::cerr << "\n===========================================================================" << std::endl;
-		std::cerr << "WARM-UP PASS " << (loop + 1) << " OF " << warmupLoops << std::endl;
+		std::cerr << "WARM-UP PASS " << (pass + 1) << " OF " << maxWarmUpPasses << std::endl;
 		std::cerr << "===========================================================================\n" << std::endl;
 
 		HANDLE hThrd, hProc;
 
-		if(!createProcess(myCommandLine, hThrd, hProc))
+		if(!createProcess(commandLine, hThrd, hProc))
 		{
-			std::cerr << "\nTimedExec: Failed to create process!" << std::endl;
+			std::cerr << "\n\nSYSTEM ERROR: Failed to create process!\n" << std::endl;
 			return EXIT_FAILURE;
 		}
 
 		if(!waitForProcess(hProc))
 		{
-			std::cerr << "\nTimedExec: Failed to wait for process termination!" << std::endl;
+			std::cerr << "\n\nSYSTEM ERROR: Failed to wait for process termination!\n" << std::endl;
 			return EXIT_FAILURE;
 		}
 
@@ -289,17 +379,17 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	/* Run Execution Passes                                       */
 	/* ---------------------------------------------------------- */
 
-	for(int loop = 0; loop < maxLoops; loop++)
+	for(int pass = 0; pass < maxPasses; pass++)
 	{
 		std::cerr << "\n===========================================================================" << std::endl;
-		std::cerr << "EXECUTION PASS " << (loop + 1) << " OF " << maxLoops << std::endl;
+		std::cerr << "METERING PASS " << (pass + 1) << " OF " << maxPasses << std::endl;
 		std::cerr << "===========================================================================\n" << std::endl;
 
 		HANDLE hThrd, hProc;
 
-		if(!createProcess(myCommandLine, hThrd, hProc, true))
+		if(!createProcess(commandLine, hThrd, hProc, true))
 		{
-			std::cerr << "\nTimedExec: Failed to create process!" << std::endl;
+			std::cerr << "\n\nSYSTEM ERROR: Failed to create process!\n" << std::endl;
 			return EXIT_FAILURE;
 		}
 
@@ -307,13 +397,14 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 		
 		if(ResumeThread(hThrd) == ((DWORD) -1))
 		{
-			std::cerr << "\nTimedExec: Failed to resume thread!" << std::endl;
+			std::cerr << "\n\nSYSTEM ERROR: Failed to resume child process!\n" << std::endl;
+			TerminateProcess(hProc, UINT(-1));
 			return EXIT_FAILURE;
 		}
 		
 		if(!waitForProcess(hProc))
 		{
-			std::cerr << "\nTimedExec: Failed to wait for process termination!" << std::endl;
+			std::cerr << "\n\nSYSTEM ERROR: Failed to wait for process termination!\n" << std::endl;
 			return EXIT_FAILURE;
 		}
 
@@ -333,38 +424,41 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 		std::cerr << "\n--> Execution took " << execTime << " seconds." << std::endl;
 		std::cerr.copyfmt(initFmt);
 
-		if(execTime > slowestResult) slowestResult = execTime;
-		if(execTime < fastestResult) fastestResult = execTime;
+		if(execTime > stats_slowest) stats_slowest = execTime;
+		if(execTime < stats_fastest) stats_fastest = execTime;
 
-		const double delta = execTime - meanResult;
-		meanResult += delta / double(loop + 1);
-		variance += delta * (execTime - meanResult);
+		// Iterative "online" computation of the mean and the variance
+		// See http://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Online_algorithm for details!
+		const double delta = execTime - stats_mean;
+		stats_mean += delta / double(pass + 1);
+		stats_variance += delta * (execTime - stats_mean);
 	}
 
-	variance /= double(maxLoops - 1);
+	stats_variance /= double(maxPasses - 1);
 
 	/* ---------------------------------------------------------- */
 	/* Print Results                                              */
 	/* ---------------------------------------------------------- */
 
-	const double standardDeviation = sqrt(variance);
-	const double standardError = standardDeviation / sqrt(double(maxLoops - 1));
-
+	// Compute the "standard error" and the "confidence" intervalls for our measurement
+	// See http://www.uni-siegen.de/phil/sozialwissenschaften/soziologie/mitarbeiter/ludwig-mayerhofer/statistik/statistik_downloads/konfidenzintervalle.pdf for details!
+	const double standardDeviation = sqrt(stats_variance);
+	const double standardError = standardDeviation / sqrt(double(maxPasses - 1));
 	const double confidenceInterval_90 = 1.645 * standardError;
 	const double confidenceInterval_95 = 1.960 * standardError;
 	const double confidenceInterval_99 = 2.576 * standardError;
 
 	std::cerr << std::setprecision(3) << std::fixed;
 	std::cerr << "\n===========================================================================" << std::endl;
-	std::cerr << "TEST COMPLETED SUCCESSFULLY AFTER " << maxLoops << " EXECUTION PASSES" << std::endl;
+	std::cerr << "TEST COMPLETED SUCCESSFULLY AFTER " << maxPasses << " METERING PASSES" << std::endl;
 	std::cerr << "---------------------------------------------------------------------------" << std::endl;
-	std::cerr << "Mean Execution Time     : " << meanResult << " seconds" << std::endl;
-	std::cerr << "90% Confidence Interval : +/- " << confidenceInterval_90 << " = [" << (meanResult - confidenceInterval_90) << ", " << (meanResult + confidenceInterval_90) << "] seconds" << std::endl;
-	std::cerr << "95% Confidence Interval : +/- " << confidenceInterval_95 << " = [" << (meanResult - confidenceInterval_95) << ", " << (meanResult + confidenceInterval_95) << "] seconds" << std::endl;
-	std::cerr << "99% Confidence Interval : +/- " << confidenceInterval_99 << " = [" << (meanResult - confidenceInterval_99) << ", " << (meanResult + confidenceInterval_99) << "] seconds" << std::endl;
+	std::cerr << "Mean Execution Time     : " << stats_mean << " seconds" << std::endl;
+	std::cerr << "90% Confidence Interval : +/- " << confidenceInterval_90 << " = [" << (stats_mean - confidenceInterval_90) << ", " << (stats_mean + confidenceInterval_90) << "] seconds" << std::endl;
+	std::cerr << "95% Confidence Interval : +/- " << confidenceInterval_95 << " = [" << (stats_mean - confidenceInterval_95) << ", " << (stats_mean + confidenceInterval_95) << "] seconds" << std::endl;
+	std::cerr << "99% Confidence Interval : +/- " << confidenceInterval_99 << " = [" << (stats_mean - confidenceInterval_99) << ", " << (stats_mean + confidenceInterval_99) << "] seconds" << std::endl;
 	std::cerr << "Standard Deviation      : " << standardDeviation << " seconds" << std::endl;
 	std::cerr << "Standard Error          : " << standardError << " seconds" << std::endl;
-	std::cerr << "Fastest / Slowest Pass  : " << fastestResult << " / " << slowestResult << " seconds" << std::endl;
+	std::cerr << "Fastest / Slowest Pass  : " << stats_fastest << " / " << stats_slowest << " seconds" << std::endl;
 	std::cerr << "===========================================================================\n" << std::endl;
 	std::cerr.copyfmt(initFmt);
 
@@ -373,20 +467,13 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	/* ---------------------------------------------------------- */
 
 	FILE *fLog = NULL;
-	if(_tfopen_s(&fLog, logFile, _T("a+")) == 0)
+	if(_tfopen_s(&fLog, logFile.c_str(), _T("a+")) == 0)
 	{
-		struct _stati64 stats;
-		if(_fstati64(_fileno(fLog), &stats) == 0)
+		if(getCurrentFileSize(fLog) == 0)
 		{
-			if(stats.st_size == 0)
-			{
-				_ftprintf_s(fLog, _T("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n"), _T("Program"), _T("Passes"), _T("Mean Time"), _T("90% Confidence Interval"), _T("95% Confidence Interval"), _T("99% Confidence Interval"), _T("Fastest Pass"), _T("Slowest Pass"), _T("Standard Deviation"), _T("Standard Error"), _T("Command"));
-			}
+			_ftprintf_s(fLog, _T("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n"), _T("Program"), _T("Passes"), _T("Mean Time"), _T("90% Confidence Interval"), _T("95% Confidence Interval"), _T("99% Confidence Interval"), _T("Fastest Pass"), _T("Slowest Pass"), _T("Standard Deviation"), _T("Standard Error"), _T("Command"));
 		}
-		_tcsncpy_s(temp, MAX_PATH, szArglist[1], _TRUNCATE);
-		TCHAR *ctx, *exeName = _tcstok_s(temp, _T(":/\\"), &ctx);
-		while(TCHAR *tok = _tcstok_s(NULL, _T(":/\\"), &ctx)) exeName = tok;
-		_ftprintf_s(fLog, _T("%s\t%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%s\n"), exeName, maxLoops, meanResult, confidenceInterval_90, confidenceInterval_95, confidenceInterval_99, fastestResult, slowestResult, standardDeviation, standardError, myCommandLine);
+		_ftprintf_s(fLog, _T("%s\t%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%s\n"), getFileNameOnly(programFile).c_str(), maxPasses, stats_mean, confidenceInterval_90, confidenceInterval_95, confidenceInterval_99, stats_fastest, stats_slowest, standardDeviation, standardError, commandLine.c_str());
 		fclose(fLog); fLog = NULL;
 	}
 	else
@@ -395,10 +482,9 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	}
 
 	/* ---------------------------------------------------------- */
-	/* Final Clean-up                                             */
+	/* Goodbye!                                                   */
 	/* ---------------------------------------------------------- */
 
-	LocalFree(szArglist);
 	return EXIT_SUCCESS;
 }
 
