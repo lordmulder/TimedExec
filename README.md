@@ -11,7 +11,7 @@ Usage Instructions
 
 TimedExec uses a very simple command-line syntax. Just type "TimedExec", followed by the program that you want to benchmark, followed by the desired arguments.
 
-*Note:* Some parameters that influence the behaviour of TimedExec can be set via environment variables.
+*Note:* Some parameters that influence the behaviour of TimedExec can be set via environment variables. Must be set *before* running the application.
 
 ```
 ===============================================================================
@@ -35,7 +35,7 @@ Influential environment variables:
 
 ### Usage Example ###
 
-In the following example we use *TimedExec* to benchmark the program **ping.exe** with the arguments **-n 12 www.google.com**:
+In the following example we use *TimedExec* to benchmark the program **ping.exe** with the arguments **-n 12 www.google.com**. The command will be executed ten times, by default:
 
 ```
 TimedExec.exe C:\Windows\System32\ping.exe -n 12 www.google.com
