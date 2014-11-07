@@ -34,10 +34,10 @@
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 3
 
-#define LOG_FILE "TimedExec.log"
-
 #define EXEC_LOOPS   10
 #define WARMUP_LOOPS 3
+
+#define LOG_FILE _T("TimedExec.log")
 
 static HANDLE g_hAbortEvent = NULL;
 static volatile bool g_aborted = false;
@@ -89,6 +89,21 @@ static bool createProcess(_TCHAR *const commandLine, HANDLE &hThrd, HANDLE &hPro
 	hThrd = processInfo.hThread;
 	hProc = processInfo.hProcess;
 
+	return true;
+}
+
+static bool waitForProcess(const HANDLE &hProc)
+{
+	HANDLE waitHandles[2] = {hProc, g_hAbortEvent};
+	const DWORD ret = WaitForMultipleObjects(2, &waitHandles[0], FALSE, INFINITE);
+	if((ret != WAIT_OBJECT_0) && (ret != WAIT_OBJECT_0 + 1))
+	{
+		return false;
+	}
+	if(ret > WAIT_OBJECT_0)
+	{
+		g_aborted = true;
+	}
 	return true;
 }
 
@@ -152,17 +167,10 @@ int _tmain(int argc, _TCHAR* argv[])
 	/* Check Command-Line                                         */
 	/* ---------------------------------------------------------- */
 
-	TCHAR *fullCmd = GetCommandLine();
-	int len = std::max(_tcslen(fullCmd) + 1U, 4096U);
-
-	TCHAR *myCmd = new TCHAR[len];
-	TCHAR *temp = new TCHAR[len];
-		
-	memset(myCmd, 0, sizeof(TCHAR) * len);
-	memset(temp, 0, sizeof(TCHAR) * len);
+	TCHAR *fullCommandLine = GetCommandLine();
 	
 	int nArgs = 0;
-	TCHAR **szArglist = CommandLineToArgvW(fullCmd, &nArgs);
+	TCHAR **szArglist = CommandLineToArgvW(fullCommandLine, &nArgs);
 
 	if(szArglist == NULL)
 	{
@@ -181,21 +189,25 @@ int _tmain(int argc, _TCHAR* argv[])
 		return EXIT_FAILURE;
 	}
 
+	int len = std::max(_tcslen(fullCommandLine) + 1U, 4096U);
+	TCHAR *myCommandLine = (TCHAR*) _alloca(sizeof(TCHAR) * len);
+	myCommandLine[0] = _T('\0');
+
 	for(int i = 1; i < nArgs; i++)
 	{
 		if(i > 1)
 		{
-			_tcsncat_s(myCmd, len, _T(" "), _TRUNCATE);
+			_tcsncat_s(myCommandLine, len, _T(" "), _TRUNCATE);
 		}
 		if(_tcschr(szArglist[i], _T(' ')) == NULL)
 		{
-			_tcsncat_s(myCmd, len, szArglist[i], _TRUNCATE);
+			_tcsncat_s(myCommandLine, len, szArglist[i], _TRUNCATE);
 		}
 		else
 		{
-			_tcsncat_s(myCmd, len, _T("\""), _TRUNCATE);
-			_tcsncat_s(myCmd, len, szArglist[i], _TRUNCATE);
-			_tcsncat_s(myCmd, len, _T("\""), _TRUNCATE);
+			_tcsncat_s(myCommandLine, len, _T("\""), _TRUNCATE);
+			_tcsncat_s(myCommandLine, len, szArglist[i], _TRUNCATE);
+			_tcsncat_s(myCommandLine, len, _T("\""), _TRUNCATE);
 		}
 	}
 		
@@ -203,33 +215,28 @@ int _tmain(int argc, _TCHAR* argv[])
 	/* Check Environment Variables                                */
 	/* ---------------------------------------------------------- */
 
-	TCHAR *logFile = NULL;
+	TCHAR temp[MAX_PATH], logFile[MAX_PATH];
 	int maxLoops = EXEC_LOOPS, warmupLoops = WARMUP_LOOPS;
+	_tcsncpy_s(logFile, MAX_PATH, LOG_FILE, _TRUNCATE);
 	
-	if(getEnvVariable(_T("TIMED_EXEC_PASSES"), temp, len))
+	if(getEnvVariable(_T("TIMED_EXEC_PASSES"), temp, MAX_PATH))
 	{
-		maxLoops = std::max(1, _tstoi(temp));
+		maxLoops = std::max(3, _tstoi(temp));
 	}
-	
-	if(getEnvVariable(_T("TIMED_WARMUP_PASSES"), temp, len))
+	if(getEnvVariable(_T("TIMED_WARMUP_PASSES"), temp, MAX_PATH))
 	{
 		warmupLoops = std::max(0, _tstoi(temp));
 	}
-
-	if(getEnvVariable(_T("TIMED_EXEC_LOGFILE"), temp, len))
+	if(getEnvVariable(_T("TIMED_EXEC_LOGFILE"), temp, MAX_PATH))
 	{
-		logFile = _tcsdup(temp);
-	}
-	else
-	{
-		logFile = _tcsdup(_T(LOG_FILE));
+		_tcsncpy_s(logFile, MAX_PATH, temp, _TRUNCATE);
 	}
 
 	/* ---------------------------------------------------------- */
 	/* Initialization                                             */
 	/* ---------------------------------------------------------- */
 
-	_ftprintf(stderr, _T("Command-line:\n%s\n"), myCmd);
+	_ftprintf(stderr, _T("Command-line:\n%s\n"), myCommandLine);
 
 	const LONGLONG timerFrequency = getTimerFrequency();
 	if(!SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS))
@@ -239,9 +246,6 @@ int _tmain(int argc, _TCHAR* argv[])
 			std::cerr << "\nWARNING: Failed to set process priroity class!" << std::endl;
 		}
 	}
-
-	double *singleResults = new double[maxLoops];
-	memset(singleResults, 0, sizeof(double) * maxLoops);
 
 	double slowestResult = 0.0;
 	double fastestResult = DBL_MAX;
@@ -261,15 +265,13 @@ int _tmain(int argc, _TCHAR* argv[])
 
 		HANDLE hThrd, hProc;
 
-		if(!createProcess(myCmd, hThrd, hProc))
+		if(!createProcess(myCommandLine, hThrd, hProc))
 		{
 			std::cerr << "\nTimedExec: Failed to create process!" << std::endl;
 			return EXIT_FAILURE;
 		}
 
-		HANDLE waitHandles[2] = {hProc, g_hAbortEvent};
-		const DWORD ret = WaitForMultipleObjects(2, &waitHandles[0], FALSE, INFINITE);
-		if((ret != WAIT_OBJECT_0) && (ret != WAIT_OBJECT_0 + 1))
+		if(!waitForProcess(hProc))
 		{
 			std::cerr << "\nTimedExec: Failed to wait for process termination!" << std::endl;
 			return EXIT_FAILURE;
@@ -297,7 +299,7 @@ int _tmain(int argc, _TCHAR* argv[])
 
 		HANDLE hThrd, hProc;
 
-		if(!createProcess(myCmd, hThrd, hProc, true))
+		if(!createProcess(myCommandLine, hThrd, hProc, true))
 		{
 			std::cerr << "\nTimedExec: Failed to create process!" << std::endl;
 			return EXIT_FAILURE;
@@ -311,9 +313,7 @@ int _tmain(int argc, _TCHAR* argv[])
 			return EXIT_FAILURE;
 		}
 		
-		HANDLE waitHandles[2] = {hProc, g_hAbortEvent};
-		const DWORD ret = WaitForMultipleObjects(2, &waitHandles[0], FALSE, INFINITE);
-		if((ret != WAIT_OBJECT_0) && (ret != WAIT_OBJECT_0 + 1))
+		if(!waitForProcess(hProc))
 		{
 			std::cerr << "\nTimedExec: Failed to wait for process termination!" << std::endl;
 			return EXIT_FAILURE;
@@ -321,7 +321,6 @@ int _tmain(int argc, _TCHAR* argv[])
 
 		const LONGLONG timeFinish = getCurrentTime();
 		const double execTime = static_cast<double>(timeFinish - timeStart) / static_cast<double>(timerFrequency);
-		singleResults[loop] = execTime;
 
 		if(g_aborted)
 		{
@@ -333,7 +332,7 @@ int _tmain(int argc, _TCHAR* argv[])
 		CloseHandle(hProc);
 
 		std::cerr << std::setprecision(3) << std::fixed;
-		std::cerr << "\nTimedExec: Execution took " << execTime << " seconds." << std::endl;
+		std::cerr << "\n--> Execution took " << execTime << " seconds." << std::endl;
 		std::cerr.copyfmt(initFmt);
 
 		if(execTime > slowestResult) slowestResult = execTime;
@@ -351,19 +350,22 @@ int _tmain(int argc, _TCHAR* argv[])
 	/* ---------------------------------------------------------- */
 
 	const double standardDeviation = sqrt(variance);
-	const double confidenceInter90 = 1.645 * standardDeviation;
-	const double confidenceInter95 = 1.960 * standardDeviation;
-	const double confidenceInter99 = 2.576 * standardDeviation;
+	const double standardError = standardDeviation / sqrt(double(maxLoops - 1));
+
+	const double confidenceInterval_90 = 1.645 * standardError;
+	const double confidenceInterval_95 = 1.960 * standardError;
+	const double confidenceInterval_99 = 2.576 * standardError;
 
 	std::cerr << std::setprecision(3) << std::fixed;
 	std::cerr << "\n===========================================================================" << std::endl;
 	std::cerr << "TEST COMPLETED SUCCESSFULLY AFTER " << maxLoops << " EXECUTION PASSES" << std::endl;
 	std::cerr << "---------------------------------------------------------------------------" << std::endl;
 	std::cerr << "Mean Execution Time     : " << meanResult << " seconds" << std::endl;
-	std::cerr << "90% Confidence Interval : " << "+/- " << confidenceInter90 << " seconds (" << 100.0 * (confidenceInter90 / meanResult) << " %)" << std::endl;
-	std::cerr << "95% Confidence Interval : " << "+/- " << confidenceInter95 << " seconds (" << 100.0 * (confidenceInter95 / meanResult) << " %)" << std::endl;
-	std::cerr << "99% Confidence Interval : " << "+/- " << confidenceInter99 << " seconds (" << 100.0 * (confidenceInter99 / meanResult) << " %)" << std::endl;
+	std::cerr << "90% Confidence Interval : +/- " << confidenceInterval_90 << " = [" << (meanResult - confidenceInterval_90) << ", " << (meanResult + confidenceInterval_90) << "] seconds" << std::endl;
+	std::cerr << "95% Confidence Interval : +/- " << confidenceInterval_95 << " = [" << (meanResult - confidenceInterval_95) << ", " << (meanResult + confidenceInterval_95) << "] seconds" << std::endl;
+	std::cerr << "99% Confidence Interval : +/- " << confidenceInterval_99 << " = [" << (meanResult - confidenceInterval_99) << ", " << (meanResult + confidenceInterval_99) << "] seconds" << std::endl;
 	std::cerr << "Standard Deviation      : " << standardDeviation << " seconds" << std::endl;
+	std::cerr << "Standard Error          : " << standardError << " seconds" << std::endl;
 	std::cerr << "Fastest / Slowest Pass  : " << fastestResult << " / " << slowestResult << " seconds" << std::endl;
 	std::cerr << "===========================================================================\n" << std::endl;
 	std::cerr.copyfmt(initFmt);
@@ -380,13 +382,13 @@ int _tmain(int argc, _TCHAR* argv[])
 		{
 			if(stats.st_size == 0)
 			{
-				_ftprintf_s(fLog, _T("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n"), _T("Program"), _T("Passes"), _T("Mean Time"), _T("90% ConfInt"), _T("95% ConfInt"), _T("99% ConfInt"), _T("Fastest"), _T("Slowest"), _T("StdDev"), _T("Command"));
+				_ftprintf_s(fLog, _T("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n"), _T("Program"), _T("Passes"), _T("Mean Time"), _T("90% Confidence Interval"), _T("95% Confidence Interval"), _T("99% Confidence Interval"), _T("Fastest Pass"), _T("Slowest Pass"), _T("Standard Deviation"), _T("Standard Error"), _T("Command"));
 			}
 		}
-		_tcsncpy_s(temp, len, szArglist[1], _TRUNCATE);
+		_tcsncpy_s(temp, MAX_PATH, szArglist[1], _TRUNCATE);
 		TCHAR *ctx, *exeName = _tcstok_s(temp, _T(":/\\"), &ctx);
 		while(TCHAR *tok = _tcstok_s(NULL, _T(":/\\"), &ctx)) exeName = tok;
-		_ftprintf_s(fLog, _T("%s\t%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%s\n"), exeName, maxLoops, meanResult, confidenceInter90, confidenceInter95, confidenceInter99, fastestResult, slowestResult, standardDeviation, myCmd);
+		_ftprintf_s(fLog, _T("%s\t%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%s\n"), exeName, maxLoops, meanResult, confidenceInterval_90, confidenceInterval_95, confidenceInterval_99, fastestResult, slowestResult, standardDeviation, standardError, myCommandLine);
 		fclose(fLog); fLog = NULL;
 	}
 	else
@@ -398,13 +400,7 @@ int _tmain(int argc, _TCHAR* argv[])
 	/* Final Clean-up                                             */
 	/* ---------------------------------------------------------- */
 
-	delete [] myCmd;
-	delete [] temp;
-	delete [] singleResults;
-
 	LocalFree(szArglist);
-	if(logFile) free(logFile);
-
 	return EXIT_SUCCESS;
 }
 
