@@ -24,6 +24,7 @@
 #include <iostream>
 #include <iomanip>
 #include <tchar.h>
+#include <io.h>
 #include <sys/stat.h>
 
 #define NOMINMAX 1
@@ -144,7 +145,7 @@ static int initializeCommandLine(tstring &commandLine, tstring &programFile)
 	programFile.clear();
 
 	int nArgs = 0;
-	TCHAR **szArglist = CommandLineToArgvW(GetCommandLine(), &nArgs);
+	TCHAR **szArglist = CommandLineToArgvW(GetCommandLineW(), &nArgs);
 
 	if((szArglist == NULL) || (nArgs < 2))
 	{
@@ -256,7 +257,7 @@ static LONG WINAPI crashHandlerRoutine(struct _EXCEPTION_POINTERS *ExceptionInfo
 {
 	static const char *const message = "\n\nGURU MEDITATION: UNHANDELED SYSTEM EXCEPTION !!!\n\n";
 	DWORD bytesWritten;
-	WriteFile(GetStdHandle(STD_ERROR_HANDLE), message, strlen(message), &bytesWritten, NULL);
+	WriteFile(GetStdHandle(STD_ERROR_HANDLE), message, lstrlenA(message), &bytesWritten, NULL);
 	TerminateProcess(GetCurrentProcess(), UINT(-1));
 	return EXCEPTION_EXECUTE_HANDLER;
 }
