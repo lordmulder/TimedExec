@@ -117,6 +117,15 @@ static void abortedHandlerRoutine(const HANDLE &hProc)
 	std::cerr << "===========================================================================\n" << std::endl;
 }
 
+static void invalidParameterHandler(const wchar_t*, const wchar_t*, const wchar_t*, unsigned int, uintptr_t)
+{
+	std::cerr << std::endl;
+	std::cerr << "\n===========================================================================" << std::endl;
+	std::cerr << "GURU MEDITATION: Invalid Parameter Handler Invoked!" << std::endl;
+	std::cerr << "===========================================================================\n" << std::endl;
+	_exit(-1);
+}
+
 static BOOL WINAPI ctrlHandlerRoutine(DWORD dwCtrlType)
 {
 	g_aborted = true;
@@ -126,7 +135,7 @@ static BOOL WINAPI ctrlHandlerRoutine(DWORD dwCtrlType)
 
 static LONG WINAPI crashHandlerRoutine(struct _EXCEPTION_POINTERS *ExceptionInfo)
 {
-	static const char *const message = "\n\nUNHANDELED EXCEPTION ERROR !!!\n\n";
+	static const char *const message = "\n\nGURU MEDITATION: UNHANDELED SYSTEM EXCEPTION !!!\n\n";
 	DWORD bytesWritten;
 	WriteFile(GetStdHandle(STD_ERROR_HANDLE), message, strlen(message), &bytesWritten, NULL);
 	TerminateProcess(GetCurrentProcess(), UINT(-1));
@@ -137,19 +146,8 @@ static LONG WINAPI crashHandlerRoutine(struct _EXCEPTION_POINTERS *ExceptionInfo
 // MAIN FUNCTION
 // =============================================================================================================
 
-int _tmain(int argc, _TCHAR* argv[])
+static int timedExecMain(int argc, _TCHAR* argv[])
 {
-	SetUnhandledExceptionFilter(crashHandlerRoutine);
-	SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
-
-	if(!(g_hAbortEvent = CreateEvent(NULL, TRUE, FALSE, NULL)))
-	{
-		std::cerr << "\nSYSTEM ERROR: Event object could not be created!\n" << std::endl;
-		return EXIT_FAILURE;
-	}
-	
-	SetConsoleCtrlHandler(ctrlHandlerRoutine, TRUE);
-
 	std::ios initFmt(NULL);
 	initFmt.copyfmt(std::cerr);
 
@@ -404,3 +402,75 @@ int _tmain(int argc, _TCHAR* argv[])
 	return EXIT_SUCCESS;
 }
 
+// =============================================================================================================
+// APPLICATION ENTRY POINT
+// =============================================================================================================
+
+static int mainEx(int argc, _TCHAR* argv[])
+{
+	int ret = EXIT_FAILURE;
+
+	try
+	{
+		ret = timedExecMain(argc, argv);
+	}
+	catch(std::exception &e)
+	{
+		std::cerr << std::endl;
+		std::cerr << "\n===========================================================================" << std::endl;
+		std::cerr << "GURU MEDITATION: Unhandeled C++ Exception (" << e.what() << ')' << std::endl;
+		std::cerr << "===========================================================================\n" << std::endl;
+		_exit(-1);
+	}
+	catch(std::exception *e)
+	{
+		std::cerr << std::endl;
+		std::cerr << "\n===========================================================================" << std::endl;
+		std::cerr << "GURU MEDITATION: Unhandeled C++ Exception (" << e->what() << ')' << std::endl;
+		std::cerr << "===========================================================================\n" << std::endl;
+		_exit(-1);
+	}	catch(...)
+	{
+		std::cerr << std::endl;
+		std::cerr << "\n===========================================================================" << std::endl;
+		std::cerr << "GURU MEDITATION: Unhandeled C++ Exception (Unknown Exception Type)" << std::endl;
+		std::cerr << "===========================================================================\n" << std::endl;
+		_exit(-1);
+	}
+
+	return ret;
+}
+
+int _tmain(int argc, _TCHAR* argv[])
+{
+	int ret = EXIT_FAILURE;
+
+#ifndef _DEBUG
+	SetUnhandledExceptionFilter(crashHandlerRoutine);
+	SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+	_set_invalid_parameter_handler(invalidParameterHandler);
+#endif // _DEBUG
+
+	if(!(g_hAbortEvent = CreateEvent(NULL, TRUE, FALSE, NULL)))
+	{
+		std::cerr << "\n\nSYSTEM ERROR: Event object could not be created!\n" << std::endl;
+		return EXIT_FAILURE;
+	}
+	
+	SetConsoleCtrlHandler(ctrlHandlerRoutine, TRUE);
+
+#ifndef _DEBUG
+	__try
+	{
+		ret = mainEx(argc, argv);
+	}
+	__except(crashHandlerRoutine(GetExceptionInformation()))
+	{
+		for(;;) _exit(-1);
+	}
+#else
+	ret = timedExecMain(argc, argv);
+#endif // _DEBUG
+
+	return ret;
+}
