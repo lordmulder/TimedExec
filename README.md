@@ -56,6 +56,14 @@ Fastest / Slowest Pass  : 11.118 / 15.075 seconds
 ===============================================================================
 ```
 
+Sources
+-------
+
+The *TimedExec* source codes are managed by [**Git**](http://git-scm.com/doc) and are available from one of the official  mirrors:
+
+* <tt>https://github.com/lordmulder/TimedExec.git</tt> ([Browse](https://github.com/lordmulder/TimedExec))
+* <tt>https://bitbucket.org/lord_mulder/timedexec.git</tt> ([Browse](https://bitbucket.org/lord_mulder/timedexec))
+* <tt>https://gitorious.org/timedexec/timedexec.git</tt> ([Browse](https://gitorious.org/timedexec/timedexec))
 
 License
 -------
