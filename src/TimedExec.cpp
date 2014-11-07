@@ -36,7 +36,7 @@
 
 #define DEFAULT_EXEC_LOOPS 10
 #define DEFAULT_WARMUP_LOOPS 3
-#define DEFAULT_LOGFILE _T("TimedExec.log")
+#define DEFAULT_LOGFILE "TimedExec.log"
 #define ENABLE_ENV_VARS true
 
 #ifdef _UNICODE
@@ -54,7 +54,7 @@ static volatile bool g_aborted = false;
 
 static bool getEnvVariable(const _TCHAR *const name, tstring &value)
 {
-	const size_t BUFF_SIZE = 512;
+	const size_t BUFF_SIZE = 1024;
 	_TCHAR buffer[BUFF_SIZE];
 
 	const DWORD ret = GetEnvironmentVariable(name, buffer, BUFF_SIZE);
@@ -109,7 +109,7 @@ static bool checkBinary(const tstring &filePath)
 
 static tstring getFullPath(const _TCHAR *const fileName)
 {
-	const size_t BUFF_SIZE = 512;
+	const size_t BUFF_SIZE = 1024;
 	_TCHAR buffer[BUFF_SIZE];
 
 	const DWORD ret = GetFullPathName(fileName, BUFF_SIZE, buffer, NULL);
@@ -119,6 +119,23 @@ static tstring getFullPath(const _TCHAR *const fileName)
 	}
 
 	return tstring(fileName);
+}
+
+static tstring getFileNameOnly(const tstring &filePath)
+{
+	static _TCHAR *FILTER = _T(":?*/\\<>|");
+
+	tstring result(filePath);
+	for(size_t i = 0; FILTER[i]; i++)
+	{
+		size_t pos;
+		if((pos = result.rfind(FILTER[i])) != tstring::npos)
+		{
+			result.erase(0, ++pos);
+		}
+	}
+
+	return result;
 }
 
 static int initializeCommandLine(tstring &commandLine, tstring &programFile)
@@ -165,21 +182,6 @@ static int initializeCommandLine(tstring &commandLine, tstring &programFile)
 	return nArgs;
 }
 
-static tstring getFileNameOnly(const tstring &filePath)
-{
-	tstring result(filePath);
-	static _TCHAR *FILTER = _T(":?*/\\<>|");
-	for(size_t i = 0; FILTER[i]; i++)
-	{
-		size_t pos;
-		if((pos = result.rfind(FILTER[i])) != tstring::npos)
-		{
-			result.erase(0, pos);
-		}
-	}
-	return result;
-}
-
 static bool createProcess(const tstring &commandLine, HANDLE &hThrd, HANDLE &hProc, const bool suspended = false)
 {
 	STARTUPINFO startInfo;
@@ -213,22 +215,33 @@ static bool waitForProcess(const HANDLE &hProc)
 	return true;
 }
 
+static int getProcessExitCode(const HANDLE &hProc)
+{
+	DWORD exitCode;
+	if(GetExitCodeProcess(hProc, &exitCode))
+	{
+		return *reinterpret_cast<int*>(&exitCode);
+	}
+
+	return 0;
+}
+
 static void abortedHandlerRoutine(const HANDLE &hProc)
 {
 	TerminateProcess(hProc, UINT(-1));
 	WaitForSingleObject(hProc, INFINITE);
 	std::cerr << std::endl;
-	std::cerr << "\n===========================================================================" << std::endl;
+	std::cerr << "\n===============================================================================" << std::endl;
 	std::cerr << "ABORTED BY USER !!!" << std::endl;
-	std::cerr << "===========================================================================\n" << std::endl;
+	std::cerr << "===============================================================================\n" << std::endl;
 }
 
 static void invalidParameterHandler(const wchar_t*, const wchar_t*, const wchar_t*, unsigned int, uintptr_t)
 {
 	std::cerr << std::endl;
-	std::cerr << "\n===========================================================================" << std::endl;
+	std::cerr << "\n===============================================================================" << std::endl;
 	std::cerr << "GURU MEDITATION: Invalid Parameter Handler Invoked!" << std::endl;
-	std::cerr << "===========================================================================\n" << std::endl;
+	std::cerr << "===============================================================================\n" << std::endl;
 	_exit(-1);
 }
 
@@ -257,13 +270,13 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	std::ios initFmt(NULL);
 	initFmt.copyfmt(std::cerr);
 
-	std::cerr << "\n===========================================================================" << std::endl;
+	std::cerr << "\n===============================================================================" << std::endl;
 	std::cerr << "Timed Exec - Benchmarking Utility, Version " << VERSION_MAJOR << '.' << std::setfill('0') << std::setw(2) << VERSION_MINOR << " [" __DATE__ "]" << std::endl;
 	std::cerr << "Copyright (c) 2014 LoRd_MuldeR <mulder2@gmx.de>. Some rights reserved.\n" << std::endl;
 	std::cerr << "This program is free software: you can redistribute it and/or modify" << std::endl;
 	std::cerr << "it under the terms of the GNU General Public License <http://www.gnu.org/>." << std::endl;
 	std::cerr << "Note that this program is distributed with ABSOLUTELY NO WARRANTY." << std::endl;
-	std::cerr << "===========================================================================\n" << std::endl;
+	std::cerr << "===============================================================================\n" << std::endl;
 
 	std::cerr.copyfmt(initFmt);
 
@@ -277,9 +290,10 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 		std::cerr << "Usage:" << std::endl;
 		std::cerr << "  TimedExec.exe <Program.exe> [Arguments]\n" << std::endl;
 		std::cerr << "Influential environment variables:" << std::endl;
-		std::cerr << "  TIMED_EXEC_LOGFILE  - Log File (default: \"" << DEFAULT_LOGFILE << "\")" << std::endl;
-		std::cerr << "  TIMED_EXEC_PASSES   - Number of execution passes (default: " << DEFAULT_EXEC_LOOPS << ")" << std::endl;
-		std::cerr << "  TIMED_WARMUP_PASSES - Number of warm-up passes (default: " << DEFAULT_WARMUP_LOOPS << ")\n" << std::endl;
+		std::cerr << "  TIMED_EXEC_PASSES        - Number of execution passes (default: " << DEFAULT_EXEC_LOOPS << ")" << std::endl;
+		std::cerr << "  TIMED_EXEC_WARMUP_PASSES - Number of warm-up passes (default: " << DEFAULT_WARMUP_LOOPS << ")" << std::endl;
+		std::cerr << "  TIMED_EXEC_LOGFILE       - Log-File Name (default: \"" << DEFAULT_LOGFILE << "\")" << std::endl;
+		std::cerr << "  TIMED_EXEC_NO_CHECKS     - Set this to *disable* exit code checks\n" << std::endl;
 		return EXIT_FAILURE;
 	}
 
@@ -299,8 +313,9 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	/* Check Environment Variables                                */
 	/* ---------------------------------------------------------- */
 
-	tstring logFile(DEFAULT_LOGFILE);
+	tstring logFile(getFullPath(_T(DEFAULT_LOGFILE)));
 	int maxPasses = DEFAULT_EXEC_LOOPS, maxWarmUpPasses = DEFAULT_WARMUP_LOOPS;
+	bool checkExitCodes = true;
 	
 	if(ENABLE_ENV_VARS)
 	{
@@ -309,13 +324,17 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 		{
 			maxPasses = std::max(3, _tstoi(temp.c_str()));
 		}
-		if(getEnvVariable(_T("TIMED_WARMUP_PASSES"), temp))
+		if(getEnvVariable(_T("TIMED_EXEC_WARMUP_PASSES"), temp))
 		{
 			maxWarmUpPasses = std::max(0, _tstoi(temp.c_str()));
 		}
 		if(getEnvVariable(_T("TIMED_EXEC_LOGFILE"), temp))
 		{
-			logFile.swap(temp);
+			logFile = getFullPath(temp.c_str());
+		}
+		if(getEnvVariable(_T("TIMED_EXEC_NO_CHECKS"), temp))
+		{
+			checkExitCodes = (_tstoi(temp.c_str()) == 0);
 		}
 	}
 
@@ -325,7 +344,7 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 
 	_ftprintf(stderr, _T("Command-line:\n%s\n\n"), commandLine.c_str());
 	_ftprintf(stderr, _T("Log File:\n%s\n\n"), logFile.c_str());
-	std::cerr << "Number of Warm-Up/Metering passes: " << maxPasses << "x / " << maxWarmUpPasses << 'x' << std::endl;
+	std::cerr << "Warm-Up / Metering passes: " << maxWarmUpPasses << "x / " << maxPasses << 'x' << std::endl;
 
 	const LONGLONG timerFrequency = getTimerFrequency();
 	if(!SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS))
@@ -347,9 +366,9 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 
 	for(int pass = 0; pass < maxWarmUpPasses; pass++)
 	{
-		std::cerr << "\n===========================================================================" << std::endl;
+		std::cerr << "\n===============================================================================" << std::endl;
 		std::cerr << "WARM-UP PASS " << (pass + 1) << " OF " << maxWarmUpPasses << std::endl;
-		std::cerr << "===========================================================================\n" << std::endl;
+		std::cerr << "===============================================================================\n" << std::endl;
 
 		HANDLE hThrd, hProc;
 
@@ -371,6 +390,17 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 			return EXIT_FAILURE;
 		}
 
+		const int exitCode = getProcessExitCode(hProc);
+		if(checkExitCodes && (exitCode != 0))
+		{
+			std::cerr << "\n\nPROGRAM ERROR: Abnormal program termination detected! (Exit Code: " << exitCode << ")\n" << std::endl;
+			return EXIT_FAILURE;
+		}
+		else
+		{
+			std::cerr << "\n>> Process terminated with exit code " << exitCode << '.' << std::endl;
+		}
+
 		CloseHandle(hThrd);
 		CloseHandle(hProc);
 	}
@@ -381,9 +411,9 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 
 	for(int pass = 0; pass < maxPasses; pass++)
 	{
-		std::cerr << "\n===========================================================================" << std::endl;
+		std::cerr << "\n===============================================================================" << std::endl;
 		std::cerr << "METERING PASS " << (pass + 1) << " OF " << maxPasses << std::endl;
-		std::cerr << "===========================================================================\n" << std::endl;
+		std::cerr << "===============================================================================\n" << std::endl;
 
 		HANDLE hThrd, hProc;
 
@@ -417,12 +447,23 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 			return EXIT_FAILURE;
 		}
 
-		CloseHandle(hThrd);
-		CloseHandle(hProc);
+		const int exitCode = getProcessExitCode(hProc);
+		if(checkExitCodes && (exitCode != 0))
+		{
+			std::cerr << "\n\nPROGRAM ERROR: Abnormal program termination detected! (Exit Code: " << exitCode << ")\n" << std::endl;
+			return EXIT_FAILURE;
+		}
+		else
+		{
+			std::cerr << "\n>> Process terminated with exit code " << exitCode << '.' << std::endl;
+		}
 
 		std::cerr << std::setprecision(3) << std::fixed;
-		std::cerr << "\n--> Execution took " << execTime << " seconds." << std::endl;
+		std::cerr << ">> Execution took " << execTime << " seconds." << std::endl;
 		std::cerr.copyfmt(initFmt);
+
+		CloseHandle(hThrd);
+		CloseHandle(hProc);
 
 		if(execTime > stats_slowest) stats_slowest = execTime;
 		if(execTime < stats_fastest) stats_fastest = execTime;
@@ -449,17 +490,17 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	const double confidenceInterval_99 = 2.576 * standardError;
 
 	std::cerr << std::setprecision(3) << std::fixed;
-	std::cerr << "\n===========================================================================" << std::endl;
+	std::cerr << "\n===============================================================================" << std::endl;
 	std::cerr << "TEST COMPLETED SUCCESSFULLY AFTER " << maxPasses << " METERING PASSES" << std::endl;
-	std::cerr << "---------------------------------------------------------------------------" << std::endl;
+	std::cerr << "-------------------------------------------------------------------------------" << std::endl;
 	std::cerr << "Mean Execution Time     : " << stats_mean << " seconds" << std::endl;
-	std::cerr << "90% Confidence Interval : +/- " << confidenceInterval_90 << " = [" << (stats_mean - confidenceInterval_90) << ", " << (stats_mean + confidenceInterval_90) << "] seconds" << std::endl;
-	std::cerr << "95% Confidence Interval : +/- " << confidenceInterval_95 << " = [" << (stats_mean - confidenceInterval_95) << ", " << (stats_mean + confidenceInterval_95) << "] seconds" << std::endl;
-	std::cerr << "99% Confidence Interval : +/- " << confidenceInterval_99 << " = [" << (stats_mean - confidenceInterval_99) << ", " << (stats_mean + confidenceInterval_99) << "] seconds" << std::endl;
+	std::cerr << "90% Confidence Interval : +/- " << confidenceInterval_90 << " (" << 100.0 * (confidenceInterval_90 / stats_mean) << "%) = [" << (stats_mean - confidenceInterval_90) << ", " << (stats_mean + confidenceInterval_90) << "] seconds" << std::endl;
+	std::cerr << "95% Confidence Interval : +/- " << confidenceInterval_95 << " (" << 100.0 * (confidenceInterval_95 / stats_mean) << "%) = [" << (stats_mean - confidenceInterval_95) << ", " << (stats_mean + confidenceInterval_95) << "] seconds" << std::endl;
+	std::cerr << "99% Confidence Interval : +/- " << confidenceInterval_99 << " (" << 100.0 * (confidenceInterval_99 / stats_mean) << "%) = [" << (stats_mean - confidenceInterval_99) << ", " << (stats_mean + confidenceInterval_99) << "] seconds" << std::endl;
 	std::cerr << "Standard Deviation      : " << standardDeviation << " seconds" << std::endl;
 	std::cerr << "Standard Error          : " << standardError << " seconds" << std::endl;
 	std::cerr << "Fastest / Slowest Pass  : " << stats_fastest << " / " << stats_slowest << " seconds" << std::endl;
-	std::cerr << "===========================================================================\n" << std::endl;
+	std::cerr << "===============================================================================\n" << std::endl;
 	std::cerr.copyfmt(initFmt);
 
 	/* ---------------------------------------------------------- */
@@ -471,14 +512,22 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	{
 		if(getCurrentFileSize(fLog) == 0)
 		{
-			_ftprintf_s(fLog, _T("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n"), _T("Program"), _T("Passes"), _T("Mean Time"), _T("90% Confidence Interval"), _T("95% Confidence Interval"), _T("99% Confidence Interval"), _T("Fastest Pass"), _T("Slowest Pass"), _T("Standard Deviation"), _T("Standard Error"), _T("Command"));
+			_ftprintf_s(fLog, _T("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n"), _T("Program"), _T("Passes"), _T("Mean Time"), _T("90% Confidence Interval"), _T("95% Confidence Interval"), _T("99% Confidence Interval"), _T("Fastest Pass"), _T("Slowest Pass"), _T("Standard Deviation"), _T("Standard Error"), _T("Command Line"));
 		}
 		_ftprintf_s(fLog, _T("%s\t%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%s\n"), getFileNameOnly(programFile).c_str(), maxPasses, stats_mean, confidenceInterval_90, confidenceInterval_95, confidenceInterval_99, stats_fastest, stats_slowest, standardDeviation, standardError, commandLine.c_str());
+		if(ferror(fLog) == 0)
+		{
+			_ftprintf(stderr, _T("Log file updated successfully.\n\n"));
+		}
+		else
+		{
+			_ftprintf(stderr, _T("Failed to append data to the specified log file:\n%s\n\n"), logFile.c_str());
+		}
 		fclose(fLog); fLog = NULL;
 	}
 	else
 	{
-		std::cerr << "Error: Failed to append results to log file!\n" << std::endl;
+		_ftprintf(stderr, _T("Failed to open the specified log file for writing:\n%s\n\n"), logFile.c_str());
 	}
 
 	/* ---------------------------------------------------------- */
@@ -503,24 +552,24 @@ static int mainEx(int argc, _TCHAR* argv[])
 	catch(std::exception &e)
 	{
 		std::cerr << std::endl;
-		std::cerr << "\n===========================================================================" << std::endl;
+		std::cerr << "\n===============================================================================" << std::endl;
 		std::cerr << "GURU MEDITATION: Unhandeled C++ Exception (" << e.what() << ')' << std::endl;
-		std::cerr << "===========================================================================\n" << std::endl;
+		std::cerr << "===============================================================================\n" << std::endl;
 		_exit(-1);
 	}
 	catch(std::exception *e)
 	{
 		std::cerr << std::endl;
-		std::cerr << "\n===========================================================================" << std::endl;
+		std::cerr << "\n===============================================================================" << std::endl;
 		std::cerr << "GURU MEDITATION: Unhandeled C++ Exception (" << e->what() << ')' << std::endl;
-		std::cerr << "===========================================================================\n" << std::endl;
+		std::cerr << "===============================================================================\n" << std::endl;
 		_exit(-1);
 	}	catch(...)
 	{
 		std::cerr << std::endl;
-		std::cerr << "\n===========================================================================" << std::endl;
+		std::cerr << "\n===============================================================================" << std::endl;
 		std::cerr << "GURU MEDITATION: Unhandeled C++ Exception (Unknown Exception Type)" << std::endl;
-		std::cerr << "===========================================================================\n" << std::endl;
+		std::cerr << "===============================================================================\n" << std::endl;
 		_exit(-1);
 	}
 
