@@ -63,7 +63,7 @@ The *TimedExec* source codes are managed by [**Git**](http://git-scm.com/doc) an
 
 * <tt>https://github.com/lordmulder/TimedExec.git</tt> ([Browse](https://github.com/lordmulder/TimedExec))
 * <tt>https://bitbucket.org/muldersoft/timedexec.git</tt> ([Browse](https://bitbucket.org/muldersoft/timedexec))
-* <tt>https://gitorious.org/timedexec/timedexec.git</tt> ([Browse](https://gitorious.org/timedexec/timedexec))
+* <tt>https://gitlab.com/timedexec/timedexec.git</tt> ([Browse](https://gitlab.com/timedexec/timedexec))
 
 License
 -------
