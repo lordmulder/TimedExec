@@ -46,12 +46,17 @@ if not exist "%VCToolsInstallDir%\bin\Hostx64\x86\cl.exe" (
 		goto BuildError
 	)
 )
+
 if not exist "%UPX3_PATH%\upx.exe" (
 	echo UPX binary could not be found. Please check your UPX3_PATH var^^!
 	goto BuildError
 )
 if not exist "%PDOC_PATH%\pandoc.exe" (
 	echo Pandoc binary could not be found. Please check your PDOC_PATH var^^!
+	goto BuildError
+)
+if not exist "%JAVA_HOME%\bin\java.exe" (
+	echo Java binary could not be found. Please check your JAVA_HOME var^^!
 	goto BuildError
 )
 
@@ -109,8 +114,12 @@ copy "%~dp0\bin\Win32\Release\*.exe" "%PACK_PATH%"
 copy "%~dp0\bin\x64\.\Release\*.exe" "%PACK_PATH%\x64"
 copy "%~dp0\LICENSE.html"            "%PACK_PATH%"
 
-"%PDOC_PATH%\pandoc.exe" --from markdown_github+header_attributes --to html5 --standalone -H "%~dp0\img\Style.inc" "%~dp0\README.md" --output "%PACK_PATH%\README.html"
+"%PDOC_PATH%\pandoc.exe" --from markdown_github+pandoc_title_block+header_attributes+implicit_figures+inline_notes --to html5 --toc -N --standalone -H "%~dp0\..\Prerequisites\Pandoc\css\github-pandoc.inc" "README.md" | "%JAVA_HOME%\bin\java.exe" -jar "%~dp0\..\Prerequisites\HTMLCompressor\bin\htmlcompressor-1.5.3.jar" --compress-css -o "%PACK_PATH%\README.html"
 
+mkdir "%PACK_PATH%\img"
+mkdir "%PACK_PATH%\img\timedexec"
+
+copy "%~dp0img\timedexec\*.*" "%PACK_PATH%\img\timedexec"
 
 REM ///////////////////////////////////////////////////////////////////////////
 REM // Compress
@@ -121,23 +130,23 @@ REM ///////////////////////////////////////////////////////////////////////////
 REM ///////////////////////////////////////////////////////////////////////////
 REM // Create version tag
 REM ///////////////////////////////////////////////////////////////////////////
-echo TimedExec >                                                                                     "%PACK_PATH%\BUILD_TAG"
-echo Copyright (C) 2018 LoRd_MuldeR ^<MuldeR2@GMX.de^> >>                                            "%PACK_PATH%\BUILD_TAG"
-echo. >>                                                                                             "%PACK_PATH%\BUILD_TAG"
-echo Built on %ISO_DATE%, at %ISO_TIME% >>                                                           "%PACK_PATH%\BUILD_TAG"
-echo. >>                                                                                             "%PACK_PATH%\BUILD_TAG"
-cl 2>&1  | "%~dp0\etc\head.exe" -n1 | "%~dp0\etc\sed.exe" -e "/^$/d" -e "s/^/Compiler version: /" >> "%PACK_PATH%\BUILD_TAG"
-ver 2>&1 |                            "%~dp0\etc\sed.exe" -e "/^$/d" -e "s/^/Build platform:   /" >> "%PACK_PATH%\BUILD_TAG"
-echo. >>                                                                                             "%PACK_PATH%\BUILD_TAG"
-echo This program is free software; you can redistribute it and/or >>                                "%PACK_PATH%\BUILD_TAG"
-echo modify it under the terms of the GNU General Public License >>                                  "%PACK_PATH%\BUILD_TAG"
-echo as published by the Free Software Foundation; either version 2 >>                               "%PACK_PATH%\BUILD_TAG"
-echo of the License, or (at your option) any later version. >>                                       "%PACK_PATH%\BUILD_TAG"
-echo. >>                                                                                             "%PACK_PATH%\BUILD_TAG"
-echo This program is distributed in the hope that it will be useful, >>                              "%PACK_PATH%\BUILD_TAG"
-echo but WITHOUT ANY WARRANTY; without even the implied warranty of >>                               "%PACK_PATH%\BUILD_TAG"
-echo MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the >>                                "%PACK_PATH%\BUILD_TAG"
-echo GNU General Public License for more details. >>                                                 "%PACK_PATH%\BUILD_TAG"
+echo TimedExec>                                                                                     "%PACK_PATH%\BUILD_TAG"
+echo Copyright (C) 2018 LoRd_MuldeR ^<MuldeR2@GMX.de^>>>                                            "%PACK_PATH%\BUILD_TAG"
+echo.>>                                                                                             "%PACK_PATH%\BUILD_TAG"
+echo Built on %ISO_DATE%, at %ISO_TIME%>>                                                           "%PACK_PATH%\BUILD_TAG"
+echo.>>                                                                                             "%PACK_PATH%\BUILD_TAG"
+cl 2>&1  | "%~dp0\etc\head.exe" -n1 | "%~dp0\etc\sed.exe" -e "/^$/d" -e "s/^/Compiler version: /">> "%PACK_PATH%\BUILD_TAG"
+ver 2>&1 |                            "%~dp0\etc\sed.exe" -e "/^$/d" -e "s/^/Build platform:   /">> "%PACK_PATH%\BUILD_TAG"
+echo.>>                                                                                             "%PACK_PATH%\BUILD_TAG"
+echo This program is free software; you can redistribute it and/or>>                                "%PACK_PATH%\BUILD_TAG"
+echo modify it under the terms of the GNU General Public License>>                                  "%PACK_PATH%\BUILD_TAG"
+echo as published by the Free Software Foundation; either version 2>>                               "%PACK_PATH%\BUILD_TAG"
+echo of the License, or (at your option) any later version.>>                                       "%PACK_PATH%\BUILD_TAG"
+echo.>>                                                                                             "%PACK_PATH%\BUILD_TAG"
+echo This program is distributed in the hope that it will be useful,>>                              "%PACK_PATH%\BUILD_TAG"
+echo but WITHOUT ANY WARRANTY; without even the implied warranty of>>                               "%PACK_PATH%\BUILD_TAG"
+echo MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the>>                                "%PACK_PATH%\BUILD_TAG"
+echo GNU General Public License for more details.>>                                                 "%PACK_PATH%\BUILD_TAG"
 
 REM ///////////////////////////////////////////////////////////////////////////
 REM // Attributes
