@@ -4,9 +4,9 @@ setlocal enabledelayedexpansion
 REM ///////////////////////////////////////////////////////////////////////////
 REM // Set Paths
 REM ///////////////////////////////////////////////////////////////////////////
-set "MSVC_PATH=C:\Program Files (x86)\Microsoft Visual Studio 12.0\VC"
-set "UPX3_PATH=C:\Program Files (x86)\UPX"
-set "PDOC_PATH=C:\Program Files (x86)\Pandoc"
+set "MSVC_PATH=C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC"
+set "UPX3_PATH=%~dp0..\Prerequisites\UPX"
+set "PDOC_PATH=%~dp0..\Prerequisites\Pandoc"
 
 REM ###############################################
 REM # DO NOT MODIFY ANY LINES BELOW THIS LINE !!! #
@@ -15,16 +15,16 @@ REM ###############################################
 REM ///////////////////////////////////////////////////////////////////////////
 REM // Setup environment
 REM ///////////////////////////////////////////////////////////////////////////
-call "%MSVC_PATH%\vcvarsall.bat" x86
+call "%MSVC_PATH%\Auxiliary\Build\vcvarsall.bat" x86
 
 REM ///////////////////////////////////////////////////////////////////////////
 REM // Check environment
 REM ///////////////////////////////////////////////////////////////////////////
-if "%VCINSTALLDIR%"=="" (
+if "%VCToolsInstallDir%"=="" (
 	echo %%VCINSTALLDIR%% not specified. Please check your MSVC_PATH var^^!
 	goto BuildError
 )
-if not exist "%VCINSTALLDIR%\bin\cl.exe" (
+if not exist "%VCToolsInstallDir%\bin\Hostx64\x86\cl.exe" (
 	echo C++ compiler binary not found. Please check your MSVC_PATH var^^!
 	goto BuildError
 )
