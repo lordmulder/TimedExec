@@ -1,6 +1,6 @@
 //////////////////////////////////////////////////////////////////////////////////
 // Timed Exec - Command-Line Benchmarking Utility
-// Copyright (c) 2014 LoRd_MuldeR <mulder2@gmx.de>. Some rights reserved.
+// Copyright (c) 2018 LoRd_MuldeR <mulder2@gmx.de>. Some rights reserved.
 //
 // This program is free software; you can redistribute it and/or
 // modify it under the terms of the GNU General Public License
@@ -20,6 +20,7 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 #include <cstdlib>
+#include <vector>
 #include <algorithm>
 #include <iostream>
 #include <iomanip>
@@ -31,12 +32,13 @@
 #define WIN32_LEAN_AND_MEAN 1
 #include <Windows.h>
 #include <ShellAPI.h>
+#include <Shlwapi.h>
 
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 3
+#define VERSION_MINOR 4
 
-#define DEFAULT_EXEC_LOOPS 10
-#define DEFAULT_WARMUP_LOOPS 3
+#define DEFAULT_EXEC_LOOPS 5
+#define DEFAULT_WARMUP_LOOPS 1
 #define DEFAULT_LOGFILE "TimedExec.log"
 #define ENABLE_ENV_VARS true
 
@@ -55,14 +57,24 @@ static volatile bool g_aborted = false;
 
 static bool getEnvVariable(const _TCHAR *const name, tstring &value)
 {
-	const size_t BUFF_SIZE = 1024;
-	_TCHAR buffer[BUFF_SIZE];
+	std::vector<TCHAR> buffer;
 
-	const DWORD ret = GetEnvironmentVariable(name, buffer, BUFF_SIZE);
-	if((ret > 0) && (ret < BUFF_SIZE))
+	for (int i = 0; i < 3; ++i)
 	{
-		value = buffer;
-		return true;
+		const DWORD result = GetEnvironmentVariable(name, buffer.data(), (DWORD)buffer.size());
+		if (!result)
+		{
+			break; /*failed*/
+		}
+		if (result > buffer.size())
+		{
+			buffer.resize(result); /*adjust buffer*/
+		}
+		else if (result < buffer.size())
+		{
+			value = tstring(buffer.data());
+			return true;
+		}
 	}
 
 	value.clear();
@@ -91,7 +103,6 @@ static LONGLONG getTimerFrequency(void)
 	return timeValue.QuadPart;
 }
 
-
 static long long getCurrentFileSize(FILE *const filePtr)
 {
 	struct _stati64 stats;
@@ -110,13 +121,23 @@ static bool checkBinary(const tstring &filePath)
 
 static tstring getFullPath(const _TCHAR *const fileName)
 {
-	const size_t BUFF_SIZE = 1024;
-	_TCHAR buffer[BUFF_SIZE];
+	std::vector<TCHAR> buffer;
 
-	const DWORD ret = GetFullPathName(fileName, BUFF_SIZE, buffer, NULL);
-	if((ret > 0) && (ret < BUFF_SIZE))
+	for (int i = 0; i < 3; ++i)
 	{
-		return tstring(buffer);
+		const DWORD result = GetFullPathName(fileName, (DWORD)buffer.size(), buffer.data(), NULL);
+		if (!result)
+		{
+			break; /*failed*/
+		}
+		if (result > buffer.size())
+		{
+			buffer.resize(result); /*adjust buffer*/
+		}
+		else if (result < buffer.size())
+		{
+			return tstring(buffer.data());
+		}
 	}
 
 	return tstring(fileName);
@@ -124,19 +145,34 @@ static tstring getFullPath(const _TCHAR *const fileName)
 
 static tstring getFileNameOnly(const tstring &filePath)
 {
-	static _TCHAR *FILTER = _T(":?*/\\<>|");
-
-	tstring result(filePath);
-	for(size_t i = 0; FILTER[i]; i++)
+	TCHAR *buffer = _tcsdup(filePath.c_str());
+	if (!buffer)
 	{
-		size_t pos;
-		if((pos = result.rfind(FILTER[i])) != tstring::npos)
-		{
-			result.erase(0, ++pos);
-		}
+		return tstring();
 	}
 
+	PathStripPath(buffer);
+
+	const tstring result(buffer);
+	free(buffer);
 	return result;
+}
+
+static double computeMedian(std::vector<double> &data)
+{
+	if (data.empty())
+	{
+		return 0.0;
+	}
+
+	std::sort(data.begin(), data.end());
+
+	const size_t size = data.size();
+	const size_t center = size / 2U;
+
+	return (!(size & 1U))
+		? ((data[center - 1U] + data[center]) / 2.0)
+		: data[center];
 }
 
 static int initializeCommandLine(tstring &commandLine, tstring &programFile)
@@ -273,7 +309,7 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 
 	std::cerr << "\n===============================================================================" << std::endl;
 	std::cerr << "Timed Exec - Benchmarking Utility, Version " << VERSION_MAJOR << '.' << std::setfill('0') << std::setw(2) << VERSION_MINOR << " [" __DATE__ "]" << std::endl;
-	std::cerr << "Copyright (c) 2014 LoRd_MuldeR <mulder2@gmx.de>. Some rights reserved.\n" << std::endl;
+	std::cerr << "Copyright (c) 2018 LoRd_MuldeR <mulder2@gmx.de>. Some rights reserved.\n" << std::endl;
 	std::cerr << "This program is free software: you can redistribute it and/or modify" << std::endl;
 	std::cerr << "it under the terms of the GNU General Public License <http://www.gnu.org/>." << std::endl;
 	std::cerr << "Note that this program is distributed with ABSOLUTELY NO WARRANTY." << std::endl;
@@ -323,11 +359,11 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 		tstring temp;
 		if(getEnvVariable(_T("TIMED_EXEC_PASSES"), temp))
 		{
-			maxPasses = std::max(3, _tstoi(temp.c_str()));
+			maxPasses = std::min(SHRT_MAX, std::max(3, _tstoi(temp.c_str())));
 		}
 		if(getEnvVariable(_T("TIMED_EXEC_WARMUP_PASSES"), temp))
 		{
-			maxWarmUpPasses = std::max(0, _tstoi(temp.c_str()));
+			maxWarmUpPasses = std::min(SHRT_MAX, std::max(0, _tstoi(temp.c_str())));
 		}
 		if(getEnvVariable(_T("TIMED_EXEC_LOGFILE"), temp))
 		{
@@ -356,6 +392,8 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 		}
 	}
 
+	std::vector<double> stats_samples(maxPasses, 0.0);
+
 	double stats_mean     = 0.0;
 	double stats_variance = 0.0;
 	double stats_fastest  = DBL_MAX;
@@ -368,7 +406,7 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	for(int pass = 0; pass < maxWarmUpPasses; pass++)
 	{
 		std::cerr << "\n===============================================================================" << std::endl;
-		std::cerr << "WARM-UP PASS " << (pass + 1) << " OF " << maxWarmUpPasses << std::endl;
+		if (maxWarmUpPasses > 1) std::cerr << "WARM-UP PASS " << (pass + 1) << " OF " << maxWarmUpPasses << std::endl; else std::cerr << "WARM-UP PASS" << std::endl;
 		std::cerr << "===============================================================================\n" << std::endl;
 
 		HANDLE hThrd, hProc;
@@ -413,7 +451,7 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	for(int pass = 0; pass < maxPasses; pass++)
 	{
 		std::cerr << "\n===============================================================================" << std::endl;
-		std::cerr << "METERING PASS " << (pass + 1) << " OF " << maxPasses << std::endl;
+		if (maxPasses > 1) std::cerr << "METERING PASS " << (pass + 1) << " OF " << maxPasses << std::endl; else std::cerr << "METERING PASS" << std::endl;
 		std::cerr << "===============================================================================\n" << std::endl;
 
 		HANDLE hThrd, hProc;
@@ -466,17 +504,21 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 		CloseHandle(hThrd);
 		CloseHandle(hProc);
 
+		// Store this sample
+		stats_samples[pass] = execTime;
+
+		// Update slowest/fastest
 		if(execTime > stats_slowest) stats_slowest = execTime;
 		if(execTime < stats_fastest) stats_fastest = execTime;
 
 		// Iterative "online" computation of the mean and the variance
 		// See http://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Online_algorithm for details!
 		const double delta = execTime - stats_mean;
-		stats_mean += delta / double(pass + 1);
+		stats_mean += delta / ((double)(pass + 1));
 		stats_variance += delta * (execTime - stats_mean);
 	}
 
-	stats_variance /= double(maxPasses - 1);
+	stats_variance /= ((double)(maxPasses - 1));
 
 	/* ---------------------------------------------------------- */
 	/* Print Results                                              */
@@ -485,16 +527,21 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	// Compute the "standard error" and the "confidence" intervalls for our measurement
 	// See http://www.uni-siegen.de/phil/sozialwissenschaften/soziologie/mitarbeiter/ludwig-mayerhofer/statistik/statistik_downloads/konfidenzintervalle.pdf for details!
 	const double standardDeviation = sqrt(stats_variance);
-	const double standardError = standardDeviation / sqrt(double(maxPasses - 1));
+	const double standardError = standardDeviation / sqrt((double)(maxPasses - 1));
 	const double confidenceInterval_90 = 1.645 * standardError;
 	const double confidenceInterval_95 = 1.960 * standardError;
 	const double confidenceInterval_99 = 2.576 * standardError;
 
+	//Compute median
+	const double medianTime = computeMedian(stats_samples);
+
+	//Print results
 	std::cerr << std::setprecision(3) << std::fixed;
 	std::cerr << "\n===============================================================================" << std::endl;
 	std::cerr << "TEST COMPLETED SUCCESSFULLY AFTER " << maxPasses << " METERING PASSES" << std::endl;
 	std::cerr << "-------------------------------------------------------------------------------" << std::endl;
 	std::cerr << "Mean Execution Time     : " << stats_mean << " seconds" << std::endl;
+	std::cerr << "Median Execution Time   : " << medianTime << " seconds" << std::endl;
 	std::cerr << "90% Confidence Interval : +/- " << confidenceInterval_90 << " (" << 100.0 * (confidenceInterval_90 / stats_mean) << "%) = [" << (stats_mean - confidenceInterval_90) << ", " << (stats_mean + confidenceInterval_90) << "] seconds" << std::endl;
 	std::cerr << "95% Confidence Interval : +/- " << confidenceInterval_95 << " (" << 100.0 * (confidenceInterval_95 / stats_mean) << "%) = [" << (stats_mean - confidenceInterval_95) << ", " << (stats_mean + confidenceInterval_95) << "] seconds" << std::endl;
 	std::cerr << "99% Confidence Interval : +/- " << confidenceInterval_99 << " (" << 100.0 * (confidenceInterval_99 / stats_mean) << "%) = [" << (stats_mean - confidenceInterval_99) << ", " << (stats_mean + confidenceInterval_99) << "] seconds" << std::endl;
@@ -513,9 +560,9 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	{
 		if(getCurrentFileSize(fLog) == 0)
 		{
-			_ftprintf_s(fLog, _T("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n"), _T("Program"), _T("Passes"), _T("Mean Time"), _T("90% Confidence Interval"), _T("95% Confidence Interval"), _T("99% Confidence Interval"), _T("Fastest Pass"), _T("Slowest Pass"), _T("Standard Deviation"), _T("Standard Error"), _T("Command Line"));
+			_ftprintf_s(fLog, _T("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n"), _T("Program"), _T("Passes"), _T("Mean Time"), _T("Median Time"), _T("90% Confidence Interval"), _T("95% Confidence Interval"), _T("99% Confidence Interval"), _T("Fastest Pass"), _T("Slowest Pass"), _T("Standard Deviation"), _T("Standard Error"), _T("Command Line"));
 		}
-		_ftprintf_s(fLog, _T("%s\t%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%s\n"), getFileNameOnly(programFile).c_str(), maxPasses, stats_mean, confidenceInterval_90, confidenceInterval_95, confidenceInterval_99, stats_fastest, stats_slowest, standardDeviation, standardError, commandLine.c_str());
+		_ftprintf_s(fLog, _T("%s\t%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%s\n"), getFileNameOnly(programFile).c_str(), maxPasses, stats_mean, medianTime, confidenceInterval_90, confidenceInterval_95, confidenceInterval_99, stats_fastest, stats_slowest, standardDeviation, standardError, commandLine.c_str());
 		if(ferror(fLog) == 0)
 		{
 			_ftprintf(stderr, _T("Log file updated successfully.\n\n"));
