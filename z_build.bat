@@ -8,6 +8,11 @@ set "MSVC_PATH=C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC"
 set "UPX3_PATH=%~dp0..\Prerequisites\UPX"
 set "PDOC_PATH=%~dp0..\Prerequisites\Pandoc"
 
+REM ///////////////////////////////////////////////////////////////////////////
+REM // Set Paths
+REM ///////////////////////////////////////////////////////////////////////////
+set "SOLUTION_FILE=TimedExec_VS2017.sln"
+
 REM ###############################################
 REM # DO NOT MODIFY ANY LINES BELOW THIS LINE !!! #
 REM ###############################################
@@ -15,18 +20,31 @@ REM ###############################################
 REM ///////////////////////////////////////////////////////////////////////////
 REM // Setup environment
 REM ///////////////////////////////////////////////////////////////////////////
-call "%MSVC_PATH%\Auxiliary\Build\vcvarsall.bat" x86
+if exist "%MSVC_PATH%\Auxiliary\Build\vcvarsall.bat" (
+	call "%MSVC_PATH%\Auxiliary\Build\vcvarsall.bat" x86
+) else (
+	if exist "%MSVC_PATH%\vcvarsall.bat" (
+		call "%MSVC_PATH%\vcvarsall.bat" x86
+	) else (
+		echo vcvarsall.bat not found. Please check your MSVC_PATH var^^!
+		goto BuildError
+	)
+)
 
 REM ///////////////////////////////////////////////////////////////////////////
 REM // Check environment
 REM ///////////////////////////////////////////////////////////////////////////
 if "%VCToolsInstallDir%"=="" (
-	echo %%VCINSTALLDIR%% not specified. Please check your MSVC_PATH var^^!
-	goto BuildError
+	if "%VCINSTALLDIR%"=="" (
+		echo %%VCINSTALLDIR%% not specified. Please check your MSVC_PATH var^^!
+		goto BuildError
+	)
 )
 if not exist "%VCToolsInstallDir%\bin\Hostx64\x86\cl.exe" (
-	echo C++ compiler binary not found. Please check your MSVC_PATH var^^!
-	goto BuildError
+	if not exist "%VCINSTALLDIR%\bin\cl.exe" (
+		echo C++ compiler binary not found. Please check your MSVC_PATH var^^!
+		goto BuildError
+	)
 )
 if not exist "%UPX3_PATH%\upx.exe" (
 	echo UPX binary could not be found. Please check your UPX3_PATH var^^!
@@ -66,11 +84,11 @@ for %%p in (Win32, x64) do (
 	echo BEGIN BUILD [%%p/Release]
 	echo ---------------------------------------------------------------------
 
-	MSBuild.exe /property:Platform=%%p /property:Configuration=Release /target:clean   "%~dp0\TimedExec.sln"
+	MSBuild.exe /property:Platform=%%p /property:Configuration=Release /target:clean   "%~dp0\%SOLUTION_FILE%"
 	if not "!ERRORLEVEL!"=="0" goto BuildError
-	MSBuild.exe /property:Platform=%%p /property:Configuration=Release /target:rebuild "%~dp0\TimedExec.sln"
+	MSBuild.exe /property:Platform=%%p /property:Configuration=Release /target:rebuild "%~dp0\%SOLUTION_FILE%"
 	if not "!ERRORLEVEL!"=="0" goto BuildError
-	MSBuild.exe /property:Platform=%%p /property:Configuration=Release /target:build   "%~dp0\TimedExec.sln"
+	MSBuild.exe /property:Platform=%%p /property:Configuration=Release /target:build   "%~dp0\%SOLUTION_FILE%"
 	if not "!ERRORLEVEL!"=="0" goto BuildError
 )
 
