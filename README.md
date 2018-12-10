@@ -15,8 +15,8 @@ TimedExec uses a very simple command-line syntax. Just type "TimedExec", followe
 
 ```
 ===============================================================================
-Timed Exec - Benchmarking Utility, Version 1.03 [Nov  7 2014]
-Copyright (c) 2014 LoRd_MuldeR <mulder2@gmx.de>. Some rights reserved.
+Timed Exec - Benchmarking Utility, Version 1.03
+Copyright (c) 2018 LoRd_MuldeR <mulder2@gmx.de>. Some rights reserved.
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License <http://www.gnu.org/>.
@@ -27,8 +27,8 @@ Usage:
   TimedExec.exe <Program.exe> [Arguments]
 
 Influential environment variables:
-  TIMED_EXEC_PASSES        - Number of execution passes (default: 10)
-  TIMED_EXEC_WARMUP_PASSES - Number of warm-up passes (default: 3)
+  TIMED_EXEC_PASSES        - Number of execution passes (default: 5)
+  TIMED_EXEC_WARMUP_PASSES - Number of warm-up passes (default: 1)
   TIMED_EXEC_LOGFILE       - Log-File Name (default: "TimedExec.log")
   TIMED_EXEC_NO_CHECKS     - Set this to *disable* exit code checks
 ```
@@ -44,15 +44,16 @@ TimedExec.exe C:\Windows\System32\ping.exe -n 12 www.google.com
 The resulting output, after all ten passes have been completed, may look like this:
 ```
 ===============================================================================
-TEST COMPLETED SUCCESSFULLY AFTER 10 METERING PASSES
+TEST COMPLETED SUCCESSFULLY AFTER 5 METERING PASSES
 -------------------------------------------------------------------------------
-Mean Execution Time     : 13.838 seconds
-90% Confidence Interval : +/- 1.001 ( 7.235%) = [12.836, 14.839] seconds
-95% Confidence Interval : +/- 1.193 ( 8.621%) = [12.645, 15.031] seconds
-99% Confidence Interval : +/- 1.568 (11.330%) = [12.270, 15.405] seconds
-Standard Deviation      : 1.826 seconds
-Standard Error          : 0.609 seconds
-Fastest / Slowest Pass  : 11.118 / 15.075 seconds
+Mean Execution Time     : 11.257 seconds
+Median Execution Time   : 11.255 seconds
+90% Confidence Interval : +/- 0.006 (0.053%) = [11.251, 11.263] seconds
+95% Confidence Interval : +/- 0.007 (0.063%) = [11.250, 11.264] seconds
+99% Confidence Interval : +/- 0.009 (0.083%) = [11.248, 11.266] seconds
+Standard Deviation      : 0.007 seconds
+Standard Error          : 0.004 seconds
+Fastest / Slowest Pass  : 11.253 / 11.270 seconds
 ===============================================================================
 ```
 
@@ -72,7 +73,7 @@ TimedExec is released under the terms of the [GNU General Public License](http:/
 
 ```
 Timed Exec - Command-Line Benchmarking Utility
-Copyright (c) 2014 LoRd_MuldeR <mulder2@gmx.de>. Some rights reserved.
+Copyright (c) 2018 LoRd_MuldeR <mulder2@gmx.de>. Some rights reserved.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
