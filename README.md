@@ -51,18 +51,19 @@ Results
 =======
 
 The resulting output, after all metering passes have been completed, looks like this:
+
 ```
 ===============================================================================
 TEST COMPLETED SUCCESSFULLY AFTER 5 METERING PASSES
 -------------------------------------------------------------------------------
-Mean Execution Time     : 11.257 seconds
-Median Execution Time   : 11.255 seconds
-90% Confidence Interval : +/- 0.006 (0.053%) = [11.251, 11.263] seconds
-95% Confidence Interval : +/- 0.007 (0.063%) = [11.250, 11.264] seconds
-99% Confidence Interval : +/- 0.009 (0.083%) = [11.248, 11.266] seconds
-Standard Deviation      : 0.007 seconds
-Standard Error          : 0.004 seconds
-Fastest / Slowest Pass  : 11.253 / 11.270 seconds
+Mean Execution Time     : 24.687 seconds
+Median Execution Time   : 20.522 seconds
+90% Confidence Interval : +/- 6.330 (25.643%) = [18.357, 31.018] seconds
+95% Confidence Interval : +/- 7.543 (30.553%) = [17.144, 32.230] seconds
+99% Confidence Interval : +/- 9.913 (40.156%) = [14.774, 34.600] seconds
+Standard Deviation      : 7.697 seconds
+Standard Error          : 3.848 seconds
+Fastest / Slowest Pass  : 19.739 / 37.916 seconds
 ===============================================================================
 ```
 
