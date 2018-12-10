@@ -25,6 +25,7 @@
     <ProjectGuid>{7BB6FBD8-4531-4CBB-B9EE-D440ACD7BCEC}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>TimedExec</RootNamespace>
+    <ProjectName>TimedExec</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
