@@ -1,6 +1,6 @@
 //////////////////////////////////////////////////////////////////////////////////
 // Timed Exec - Command-Line Benchmarking Utility
-// Copyright (c) 2018 LoRd_MuldeR <mulder2@gmx.de>. Some rights reserved.
+// Copyright (c) 2023 LoRd_MuldeR <mulder2@gmx.de>. Some rights reserved.
 //
 // This program is free software; you can redistribute it and/or
 // modify it under the terms of the GNU General Public License
@@ -19,6 +19,8 @@
 // http://www.gnu.org/licenses/gpl-2.0.txt
 //////////////////////////////////////////////////////////////////////////////////
 
+#include "Version.h"
+
 #include <cstdlib>
 #include <vector>
 #include <algorithm>
@@ -34,9 +36,6 @@
 #include <ShellAPI.h>
 #include <Shlwapi.h>
 
-#define VERSION_MAJOR 1
-#define VERSION_MINOR 4
-
 #define DEFAULT_EXEC_LOOPS 5
 #define DEFAULT_WARMUP_LOOPS 1
 #define DEFAULT_LOGFILE "TimedExec.log"
@@ -51,9 +50,43 @@
 static HANDLE g_hAbortEvent = NULL;
 static volatile bool g_aborted = false;
 
+/* clock for time measurement */
+typedef enum
+{
+	CLOCK_WALLCLOCK,
+	CLOCK_CPU_TOTAL,
+	CLOCK_CPU_USER,
+	CLOCK_CPU_KERNEL
+}
+clock_type_t;
+
 // =============================================================================================================
 // INTERNAL FUNCTIONS
 // =============================================================================================================
+
+#define _PRINT_CLOCK_TYPE(X) case CLOCK_##X: return #X;
+#define _PARSE_CLOCK_TYPE(X) if (!_tcsicmp(name.c_str(), _T(#X))) { clock_type = (CLOCK_##X); return true; }
+
+static bool parseClockType(const tstring &name, clock_type_t &clock_type)
+{
+	_PARSE_CLOCK_TYPE(WALLCLOCK)
+	_PARSE_CLOCK_TYPE(CPU_TOTAL)
+	_PARSE_CLOCK_TYPE(CPU_USER)
+	_PARSE_CLOCK_TYPE(CPU_KERNEL)
+	return false;
+}
+
+static const char *printClockType(const clock_type_t clock_type)
+{
+	switch (clock_type)
+	{
+		_PRINT_CLOCK_TYPE(WALLCLOCK)
+		_PRINT_CLOCK_TYPE(CPU_TOTAL)
+		_PRINT_CLOCK_TYPE(CPU_USER)
+		_PRINT_CLOCK_TYPE(CPU_KERNEL)
+	}
+	return "N/A";
+}
 
 static bool getEnvVariable(const _TCHAR *const name, tstring &value)
 {
@@ -81,32 +114,48 @@ static bool getEnvVariable(const _TCHAR *const name, tstring &value)
 	return false;
 }
 
-static LONGLONG getCurrentTime(void)
+static ULONGLONG fileTimeToU64(const PFILETIME fileTime)
 {
-	LARGE_INTEGER timeValue;
-	if(!QueryPerformanceCounter(&timeValue))
-	{
-		std::cerr << "\n\nSYSTEM ERROR: Failed to query performance counter!\n" << std::endl;
-		_exit(EXIT_FAILURE);
-	}
-	return timeValue.QuadPart;
+	ULARGE_INTEGER temp;
+	temp.HighPart = fileTime->dwHighDateTime;
+	temp.LowPart = fileTime->dwLowDateTime;
+	return temp.QuadPart;
 }
 
-static LONGLONG getTimerFrequency(void)
+static ULONGLONG getTimeElapsed(const ULONGLONG timeStart, const ULONGLONG timeExit)
 {
-	LARGE_INTEGER timeValue;
-	if(!QueryPerformanceFrequency(&timeValue))
+	return (timeExit > timeStart) ? (timeExit - timeStart) : 0ULL;
+}
+
+static double getProcessTime(const HANDLE hProc, const clock_type_t clock_type)
+{
+	FILETIME timeStart, timeExit, timeKernel, timeUser;
+	ULONGLONG result = 0ULL;
+	if (GetProcessTimes(hProc, &timeStart, &timeExit, &timeKernel, &timeUser))
 	{
-		std::cerr << "\n\nSYSTEM ERROR: Failed to query performance counter frequency!\n" << std::endl;
-		_exit(EXIT_FAILURE);
+		switch (clock_type)
+		{
+		case CLOCK_WALLCLOCK:
+			result = getTimeElapsed(fileTimeToU64(&timeStart), fileTimeToU64(&timeExit));
+			break;
+		case CLOCK_CPU_USER:
+			result = fileTimeToU64(&timeUser);
+			break;
+		case CLOCK_CPU_KERNEL:
+			result = fileTimeToU64(&timeKernel);
+			break;
+		case CLOCK_CPU_TOTAL:
+			result = fileTimeToU64(&timeKernel) + fileTimeToU64(&timeUser);
+			break;
+		}
 	}
-	return timeValue.QuadPart;
+	return static_cast<double>(result) / 10000000.0;
 }
 
 static long long getCurrentFileSize(FILE *const filePtr)
 {
 	struct _stati64 stats;
-	if(_fstati64(_fileno(filePtr), &stats) == 0)
+	if (_fstati64(_fileno(filePtr), &stats) == 0)
 	{
 		return stats.st_size;
 	}
@@ -183,7 +232,7 @@ static int initializeCommandLine(tstring &commandLine, tstring &programFile)
 	int nArgs = 0;
 	TCHAR **szArglist = CommandLineToArgvW(GetCommandLineW(), &nArgs);
 
-	if((szArglist == NULL) || (nArgs < 2))
+	if ((szArglist == NULL) || (nArgs < 2))
 	{
 		return 0;
 	}
@@ -192,7 +241,7 @@ static int initializeCommandLine(tstring &commandLine, tstring &programFile)
 	{
 		tstring token;
 
-		if(i > 1)
+		if (i > 1)
 		{
 			token = tstring(szArglist[i]);
 			commandLine += _T(' ');
@@ -203,7 +252,7 @@ static int initializeCommandLine(tstring &commandLine, tstring &programFile)
 			programFile += token;
 		}
 
-		if(token.find(' ') == tstring::npos)
+		if (token.find(' ') == tstring::npos)
 		{
 			commandLine += token;
 		}
@@ -226,7 +275,7 @@ static bool createProcess(const tstring &commandLine, HANDLE &hThrd, HANDLE &hPr
 	PROCESS_INFORMATION processInfo;
 	SecureZeroMemory(&processInfo, sizeof(PROCESS_INFORMATION));
 
-	if(!CreateProcess(NULL, (LPTSTR)commandLine.c_str(), NULL, NULL, false, HIGH_PRIORITY_CLASS | (suspended ? CREATE_SUSPENDED : 0), NULL, NULL, &startInfo, &processInfo))
+	if (!CreateProcess(NULL, (LPTSTR)commandLine.c_str(), NULL, NULL, false, HIGH_PRIORITY_CLASS | (suspended ? CREATE_SUSPENDED : 0), NULL, NULL, &startInfo, &processInfo))
 	{
 		return false;
 	}
@@ -241,11 +290,11 @@ static bool waitForProcess(const HANDLE &hProc)
 {
 	HANDLE waitHandles[2] = {hProc, g_hAbortEvent};
 	const DWORD ret = WaitForMultipleObjects(2, &waitHandles[0], FALSE, INFINITE);
-	if((ret != WAIT_OBJECT_0) && (ret != WAIT_OBJECT_0 + 1))
+	if ((ret != WAIT_OBJECT_0) && (ret != WAIT_OBJECT_0 + 1))
 	{
 		return false;
 	}
-	if(ret > WAIT_OBJECT_0)
+	if (ret > WAIT_OBJECT_0)
 	{
 		g_aborted = true;
 	}
@@ -255,7 +304,7 @@ static bool waitForProcess(const HANDLE &hProc)
 static int getProcessExitCode(const HANDLE &hProc)
 {
 	DWORD exitCode;
-	if(GetExitCodeProcess(hProc, &exitCode))
+	if (GetExitCodeProcess(hProc, &exitCode))
 	{
 		return *reinterpret_cast<int*>(&exitCode);
 	}
@@ -308,8 +357,8 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	initFmt.copyfmt(std::cerr);
 
 	std::cerr << "\n===============================================================================" << std::endl;
-	std::cerr << "Timed Exec - Benchmarking Utility, Version " << VERSION_MAJOR << '.' << std::setfill('0') << std::setw(2) << VERSION_MINOR << " [" __DATE__ "]" << std::endl;
-	std::cerr << "Copyright (c) 2018 LoRd_MuldeR <mulder2@gmx.de>. Some rights reserved.\n" << std::endl;
+	std::cerr << "Timed Exec - Benchmarking Utility, Version " << VERSION_MAJOR << '.' << std::setfill('0') << std::setw(2) << (10 * VERSION_MINOR_HI) + VERSION_MINOR_LO << " [" __DATE__ "]" << std::endl;
+	std::cerr << "Copyright (c) 2023 LoRd_MuldeR <mulder2@gmx.de>. Some rights reserved.\n" << std::endl;
 	std::cerr << "This program is free software: you can redistribute it and/or modify" << std::endl;
 	std::cerr << "it under the terms of the GNU General Public License <http://www.gnu.org/>." << std::endl;
 	std::cerr << "Note that this program is distributed with ABSOLUTELY NO WARRANTY." << std::endl;
@@ -322,7 +371,7 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	/* ---------------------------------------------------------- */
 
 	tstring commandLine, programFile;
-	if(initializeCommandLine(commandLine, programFile) < 2)
+	if (initializeCommandLine(commandLine, programFile) < 2)
 	{
 		std::cerr << "Usage:" << std::endl;
 		std::cerr << "  TimedExec.exe <Program.exe> [Arguments]\n" << std::endl;
@@ -330,17 +379,18 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 		std::cerr << "  TIMED_EXEC_PASSES        - Number of execution passes (default: " << DEFAULT_EXEC_LOOPS << ")" << std::endl;
 		std::cerr << "  TIMED_EXEC_WARMUP_PASSES - Number of warm-up passes (default: " << DEFAULT_WARMUP_LOOPS << ")" << std::endl;
 		std::cerr << "  TIMED_EXEC_LOGFILE       - Log-File Name (default: \"" << DEFAULT_LOGFILE << "\")" << std::endl;
-		std::cerr << "  TIMED_EXEC_NO_CHECKS     - Set this to *disable* exit code checks\n" << std::endl;
+		std::cerr << "  TIMED_EXEC_NO_CHECKS     - Set this to *disable* exit code checks" << std::endl;
+		std::cerr << "  TIMED_EXEC_CLOCK_TYPE    - The type of clock used for measurements\n" << std::endl;
 		return EXIT_FAILURE;
 	}
 
-	if(_taccess(programFile.c_str(), 0) != 0)
+	if (_taccess(programFile.c_str(), 0) != 0)
 	{
 		_ftprintf(stderr, _T("Specified program file could not be found or access denied:\n%s\n\n"), programFile.c_str());
 		return EXIT_FAILURE;
 	}
 
-	if(!checkBinary(programFile))
+	if (!checkBinary(programFile))
 	{
 		_ftprintf(stderr, _T("Specified file does not look like a valid Win32 executable:\n%s\n\n"), programFile.c_str());
 		return EXIT_FAILURE;
@@ -353,25 +403,34 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	tstring logFile(getFullPath(_T(DEFAULT_LOGFILE)));
 	int maxPasses = DEFAULT_EXEC_LOOPS, maxWarmUpPasses = DEFAULT_WARMUP_LOOPS;
 	bool checkExitCodes = true;
-	
-	if(ENABLE_ENV_VARS)
+	clock_type_t clock_type = CLOCK_WALLCLOCK;
+
+	if (ENABLE_ENV_VARS)
 	{
 		tstring temp;
-		if(getEnvVariable(_T("TIMED_EXEC_PASSES"), temp))
+		if (getEnvVariable(_T("TIMED_EXEC_PASSES"), temp))
 		{
 			maxPasses = std::min(SHRT_MAX, std::max(3, _tstoi(temp.c_str())));
 		}
-		if(getEnvVariable(_T("TIMED_EXEC_WARMUP_PASSES"), temp))
+		if (getEnvVariable(_T("TIMED_EXEC_WARMUP_PASSES"), temp))
 		{
 			maxWarmUpPasses = std::min(SHRT_MAX, std::max(0, _tstoi(temp.c_str())));
 		}
-		if(getEnvVariable(_T("TIMED_EXEC_LOGFILE"), temp))
+		if (getEnvVariable(_T("TIMED_EXEC_LOGFILE"), temp))
 		{
 			logFile = getFullPath(temp.c_str());
 		}
-		if(getEnvVariable(_T("TIMED_EXEC_NO_CHECKS"), temp))
+		if (getEnvVariable(_T("TIMED_EXEC_NO_CHECKS"), temp))
 		{
 			checkExitCodes = (_tstoi(temp.c_str()) == 0);
+		}
+		if (getEnvVariable(_T("TIMED_EXEC_CLOCK_TYPE"), temp))
+		{
+			if (!parseClockType(temp, clock_type))
+			{
+				_ftprintf(stderr, _T("Specified clock type \"%s\" is unsupported.\nPlease see the documentation for a list of supported clock types!\n\n"), temp.c_str());
+				return EXIT_FAILURE;
+			}
 		}
 	}
 
@@ -383,13 +442,9 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	_ftprintf(stderr, _T("Log File:\n%s\n\n"), logFile.c_str());
 	std::cerr << "Warm-Up / Metering passes: " << maxWarmUpPasses << "x / " << maxPasses << 'x' << std::endl;
 
-	const LONGLONG timerFrequency = getTimerFrequency();
-	if(!SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS))
+	if (!SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS))
 	{
-		if(!SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS))
-		{
-			std::cerr << "\nWARNING: Failed to set process priroity class!" << std::endl;
-		}
+		std::cerr << "\nWARNING: Failed to set process priroity class!" << std::endl;
 	}
 
 	std::vector<double> stats_samples(maxPasses, 0.0);
@@ -403,7 +458,7 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	/* Run Warm-Up Passes                                         */
 	/* ---------------------------------------------------------- */
 
-	for(int pass = 0; pass < maxWarmUpPasses; pass++)
+	for (int pass = 0; pass < maxWarmUpPasses; pass++)
 	{
 		std::cerr << "\n===============================================================================" << std::endl;
 		if (maxWarmUpPasses > 1) std::cerr << "WARM-UP PASS " << (pass + 1) << " OF " << maxWarmUpPasses << std::endl; else std::cerr << "WARM-UP PASS" << std::endl;
@@ -411,26 +466,26 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 
 		HANDLE hThrd, hProc;
 
-		if(!createProcess(commandLine, hThrd, hProc))
+		if (!createProcess(commandLine, hThrd, hProc))
 		{
 			std::cerr << "\n\nSYSTEM ERROR: Failed to create process!\n" << std::endl;
 			return EXIT_FAILURE;
 		}
 
-		if(!waitForProcess(hProc))
+		if (!waitForProcess(hProc))
 		{
 			std::cerr << "\n\nSYSTEM ERROR: Failed to wait for process termination!\n" << std::endl;
 			return EXIT_FAILURE;
 		}
 
-		if(g_aborted)
+		if (g_aborted)
 		{
 			abortedHandlerRoutine(hProc);
 			return EXIT_FAILURE;
 		}
 
 		const int exitCode = getProcessExitCode(hProc);
-		if(checkExitCodes && (exitCode != 0))
+		if (checkExitCodes && (exitCode != 0))
 		{
 			std::cerr << "\n\nPROGRAM ERROR: Abnormal program termination detected! (Exit Code: " << exitCode << ")\n" << std::endl;
 			return EXIT_FAILURE;
@@ -456,38 +511,33 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 
 		HANDLE hThrd, hProc;
 
-		if(!createProcess(commandLine, hThrd, hProc, true))
+		if (!createProcess(commandLine, hThrd, hProc, true))
 		{
 			std::cerr << "\n\nSYSTEM ERROR: Failed to create process!\n" << std::endl;
 			return EXIT_FAILURE;
 		}
 
-		const LONGLONG timeStart = getCurrentTime();
-		
-		if(ResumeThread(hThrd) == ((DWORD) -1))
+		if (ResumeThread(hThrd) == ((DWORD) -1))
 		{
 			std::cerr << "\n\nSYSTEM ERROR: Failed to resume child process!\n" << std::endl;
 			TerminateProcess(hProc, UINT(-1));
 			return EXIT_FAILURE;
 		}
 		
-		if(!waitForProcess(hProc))
+		if (!waitForProcess(hProc))
 		{
 			std::cerr << "\n\nSYSTEM ERROR: Failed to wait for process termination!\n" << std::endl;
 			return EXIT_FAILURE;
 		}
 
-		const LONGLONG timeFinish = getCurrentTime();
-		const double execTime = static_cast<double>(timeFinish - timeStart) / static_cast<double>(timerFrequency);
-
-		if(g_aborted)
+		if (g_aborted)
 		{
 			abortedHandlerRoutine(hProc);
 			return EXIT_FAILURE;
 		}
 
 		const int exitCode = getProcessExitCode(hProc);
-		if(checkExitCodes && (exitCode != 0))
+		if (checkExitCodes && (exitCode != 0))
 		{
 			std::cerr << "\n\nPROGRAM ERROR: Abnormal program termination detected! (Exit Code: " << exitCode << ")\n" << std::endl;
 			return EXIT_FAILURE;
@@ -496,6 +546,8 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 		{
 			std::cerr << "\n>> Process terminated with exit code " << exitCode << '.' << std::endl;
 		}
+
+		const double execTime = getProcessTime(hProc, clock_type);
 
 		std::cerr << std::setprecision(3) << std::fixed;
 		std::cerr << ">> Execution took " << execTime << " seconds." << std::endl;
@@ -508,8 +560,8 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 		stats_samples[pass] = execTime;
 
 		// Update slowest/fastest
-		if(execTime > stats_slowest) stats_slowest = execTime;
-		if(execTime < stats_fastest) stats_fastest = execTime;
+		if (execTime > stats_slowest) stats_slowest = execTime;
+		if (execTime < stats_fastest) stats_fastest = execTime;
 
 		// Iterative "online" computation of the mean and the variance
 		// See http://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Online_algorithm for details!
@@ -548,6 +600,7 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	std::cerr << "Standard Deviation      : " << standardDeviation << " seconds" << std::endl;
 	std::cerr << "Standard Error          : " << standardError << " seconds" << std::endl;
 	std::cerr << "Fastest / Slowest Pass  : " << stats_fastest << " / " << stats_slowest << " seconds" << std::endl;
+	std::cerr << "Active Clock Type       : " << printClockType(clock_type) << " (" << clock_type << ')' << std::endl;
 	std::cerr << "===============================================================================\n" << std::endl;
 	std::cerr.copyfmt(initFmt);
 
@@ -556,14 +609,14 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	/* ---------------------------------------------------------- */
 
 	FILE *fLog = NULL;
-	if(_tfopen_s(&fLog, logFile.c_str(), _T("a+")) == 0)
+	if (_tfopen_s(&fLog, logFile.c_str(), _T("a+")) == 0)
 	{
-		if(getCurrentFileSize(fLog) == 0)
+		if (getCurrentFileSize(fLog) == 0)
 		{
 			_ftprintf_s(fLog, _T("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n"), _T("Program"), _T("Passes"), _T("Mean Time"), _T("Median Time"), _T("90% Confidence Interval"), _T("95% Confidence Interval"), _T("99% Confidence Interval"), _T("Fastest Pass"), _T("Slowest Pass"), _T("Standard Deviation"), _T("Standard Error"), _T("Command Line"));
 		}
 		_ftprintf_s(fLog, _T("%s\t%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%s\n"), getFileNameOnly(programFile).c_str(), maxPasses, stats_mean, medianTime, confidenceInterval_90, confidenceInterval_95, confidenceInterval_99, stats_fastest, stats_slowest, standardDeviation, standardError, commandLine.c_str());
-		if(ferror(fLog) == 0)
+		if (ferror(fLog) == 0)
 		{
 			_ftprintf(stderr, _T("Log file updated successfully.\n\n"));
 		}
@@ -634,7 +687,7 @@ int _tmain(int argc, _TCHAR* argv[])
 	_set_invalid_parameter_handler(invalidParameterHandler);
 #endif // _DEBUG
 
-	if(!(g_hAbortEvent = CreateEvent(NULL, TRUE, FALSE, NULL)))
+	if (!(g_hAbortEvent = CreateEvent(NULL, TRUE, FALSE, NULL)))
 	{
 		std::cerr << "\n\nSYSTEM ERROR: Event object could not be created!\n" << std::endl;
 		return EXIT_FAILURE;

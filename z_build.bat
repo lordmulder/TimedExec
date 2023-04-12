@@ -108,13 +108,12 @@ echo BEGIN PACKAGING [Release]
 echo ---------------------------------------------------------------------
 
 mkdir "%PACK_PATH%"
-mkdir "%PACK_PATH%\x64"
 
-copy "%~dp0\bin\Win32\Release\*.exe" "%PACK_PATH%"
-copy "%~dp0\bin\x64\.\Release\*.exe" "%PACK_PATH%\x64"
-copy "%~dp0\LICENSE.html"            "%PACK_PATH%"
+copy "%~dp0\bin\Win32\Release\TimedExec.exe" "%PACK_PATH%\TimedExec-x86.exe"
+copy "%~dp0\bin\x64\.\Release\TimedExec.exe" "%PACK_PATH%\TimedExec-x64.exe"
+copy "%~dp0\LICENSE.html"                    "%PACK_PATH%"
 
-"%PDOC_PATH%\pandoc.exe" --from markdown_github+pandoc_title_block+header_attributes+implicit_figures+inline_notes --to html5 --toc -N --standalone -H "%~dp0\..\Prerequisites\Pandoc\css\github-pandoc.inc" "README.md" | "%JAVA_HOME%\bin\java.exe" -jar "%~dp0\..\Prerequisites\HTMLCompressor\bin\htmlcompressor-1.5.3.jar" --compress-css -o "%PACK_PATH%\README.html"
+"%PDOC_PATH%\pandoc.exe" --from markdown_github+pandoc_title_block+header_attributes+implicit_figures+inline_notes --to html5 --toc -N --metadata title="TimedExec" --standalone -H "%~dp0\..\Prerequisites\Pandoc\css\github-pandoc.inc" "README.md" | "%JAVA_HOME%\bin\java.exe" -jar "%~dp0\..\Prerequisites\HTMLCompressor\bin\htmlcompressor-1.5.3.jar" --compress-css -o "%PACK_PATH%\README.html"
 
 mkdir "%PACK_PATH%\img"
 mkdir "%PACK_PATH%\img\timedexec"
@@ -125,13 +124,12 @@ REM ///////////////////////////////////////////////////////////////////////////
 REM // Compress
 REM ///////////////////////////////////////////////////////////////////////////
 "%UPX3_PATH%\upx.exe" --best "%PACK_PATH%\*.exe"
-"%UPX3_PATH%\upx.exe" --best "%PACK_PATH%\x64\*.exe"
 
 REM ///////////////////////////////////////////////////////////////////////////
 REM // Create version tag
 REM ///////////////////////////////////////////////////////////////////////////
 echo TimedExec>                                                                                     "%PACK_PATH%\BUILD_TAG"
-echo Copyright (C) 2018 LoRd_MuldeR ^<MuldeR2@GMX.de^>>>                                            "%PACK_PATH%\BUILD_TAG"
+echo Copyright (C) 2023 LoRd_MuldeR ^<MuldeR2@GMX.de^>>>                                            "%PACK_PATH%\BUILD_TAG"
 echo.>>                                                                                             "%PACK_PATH%\BUILD_TAG"
 echo Built on %ISO_DATE%, at %ISO_TIME%>>                                                           "%PACK_PATH%\BUILD_TAG"
 echo.>>                                                                                             "%PACK_PATH%\BUILD_TAG"

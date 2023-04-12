@@ -21,6 +21,15 @@
   <ItemGroup>
     <ClCompile Include="src\TimedExec.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="res\version.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Manifest Include="res\compatibility.manifest" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\Version.h" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{7BB6FBD8-4531-4CBB-B9EE-D440ACD7BCEC}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>

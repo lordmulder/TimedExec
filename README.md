@@ -1,13 +1,12 @@
-% ![](img/timedexec/banner.jpg)  
-TimedExec &ndash; README
-% by LoRd_MuldeR &lt;<mulder2@gmx>&gt; | <http://muldersoft.com/>
+![TimedExec](img/timedexec/banner.jpg)  
+by LoRd_MuldeR &lt;<mulder2@gmx>&gt; | <http://muldersoft.com/>
 
 Introduction
 ============
 
 **TimedExec** is a small utility for *benchmarking* command-line programs. It will *execute* the specified program with the specified command-line arguments and then *measure* the time that it takes for the execution to complete. In order to obtain *accurate* results, all measurements are implemented via *high-resolution* performance timers. And, since program execution times unavoidably are subject to certain variations (e.g. due to environmental noise), each test will be repeated *multiple* times. The number of metering passes can be configured as desired. Optionally, a number of "warm-up" passes can be performed *prior to* the first metering pass. The warm-up passes prevent caching effects from interfering with the execution times.
 
-TimedExec will then compute the ***mean*** execution time as well as the ***median*** execution time of all metering passes. It will also record the *fastest* and *slowest* execution time that has been measured. Furthermore, TimedExec computes the *standard error* in order to determine ***confidence intervals*** from the benchmarking results^[[Konfidenzintervalle so einfach wie möglich erklärt](http://www.uni-siegen.de/phil/sozialwissenschaften/soziologie/mitarbeiter/ludwig-mayerhofer/statistik/statistik_downloads/konfidenzintervalle.pdf)]. These are the *ranges* which contain the program's “real” average execution time (expected value), *with very high probability*. All results will be saved to a log file.
+TimedExec will then compute the ***mean*** execution time as well as the ***median*** execution time of all metering passes. It will also record the *fastest* and *slowest* execution time that has been measured. Furthermore, TimedExec computes the *standard error* in order to determine [***confidence intervals***](http://www.uni-siegen.de/phil/sozialwissenschaften/soziologie/mitarbeiter/ludwig-mayerhofer/statistik/statistik_downloads/konfidenzintervalle.pdf) from the benchmarking results. These are the *ranges* which contain the program's “real” average execution time (expected value), *with very high probability*. All results will be saved to a log file.
 
 
 Usage Instructions
@@ -19,8 +18,8 @@ Usage Instructions
 
 ```
 ===============================================================================
-Timed Exec - Benchmarking Utility, Version 1.03
-Copyright (c) 2018 LoRd_MuldeR <mulder2@gmx.de>. Some rights reserved.
+Timed Exec - Benchmarking Utility, Version 1.05
+Copyright (c) 2023 LoRd_MuldeR <mulder2@gmx.de>. Some rights reserved.
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License <http://www.gnu.org/>.
@@ -35,7 +34,18 @@ Influential environment variables:
   TIMED_EXEC_WARMUP_PASSES - Number of warm-up passes (default: 1)
   TIMED_EXEC_LOGFILE       - Log-File Name (default: "TimedExec.log")
   TIMED_EXEC_NO_CHECKS     - Set this to *disable* exit code checks
+  TIMED_EXEC_CLOCK_TYPE    - The type of clock used for measurements
 ```
+
+Clock Types
+-----------
+
+*TimedExec* supports the following clock types:
+
+- `WALLCLOCK` &ndash; the wall-clock time, also known as *elapsed real time* (default)
+- `CPU_TOTAL` &ndash; total CPU time, i.e. sum of CPU time spent in "user" *and* "kernel" modes
+- `CPU_USER` &ndash; CPU time spent in "user" mode only
+- `CPU_KERNEL` &ndash; CPU time spent in "kernel" mode only
 
 Usage Example
 -------------
@@ -64,13 +74,14 @@ Median Execution Time   : 20.522 seconds
 Standard Deviation      : 7.697 seconds
 Standard Error          : 3.848 seconds
 Fastest / Slowest Pass  : 19.739 / 37.916 seconds
+Active Clock Type       : WALLCLOCK (0)
 ===============================================================================
 ```
 
 Interpretation
 --------------
 
-When comparing measurement results, the ***mean*** (average) execution time may seem like the most obvious choice. However, it has to be noted that the *mean* of a data sample is highly sensitive to “outliers” and therefore can be misleading! This is especially true, when there exists a lot of variation in the data sample. Consequently, comparing the ***median*** execution times usually is the preferable choice. That is because the *median* of a data sample is much more robust against outliers.
+When comparing measurement results, the ***mean*** (average) execution time may seem like the most obvious choice. However, it has to be noted that the *mean* of a data sample is highly sensitive to “outliers” and therefore can be misleading! This is especially true, when there exists a lot of variation in the data sample. Consequently, comparing the ***median*** execution times often is the better choice. That is because the *median* of a data sample is much more robust against outliers.
 
 Furthermore, it is important to keep in mind that the *mean* (or *median*) execution time computed from a limited number of metering passes only yields an ***estimate*** of the program's “real” average execution time (expected value). The “real” value can only be determined accurately from an *infitinte* number of metering passes &ndash; which is **not** possible in practice. In this situation, we can have a look at the ***confidence intervals***. These intervals contain the “real” value, *with very high probability*. The most commonly used *confidence interval* is the “95%” one (higher confidence means broader interval, and vice versa).
 
@@ -94,7 +105,7 @@ TimedExec is released under the terms of the [GNU General Public License](http:/
 
 ```
 Timed Exec - Command-Line Benchmarking Utility
-Copyright (c) 2018 LoRd_MuldeR <mulder2@gmx.de>. Some rights reserved.
+Copyright (c) 2018-2023 LoRd_MuldeR <mulder2@gmx.de>. Some rights reserved.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License

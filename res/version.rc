@@ -1,0 +1,68 @@
+/////////////////////////////////////////////////////////////////////////////
+//
+// Microsoft Visual C++ generated resource script.
+//
+#define APSTUDIO_READONLY_SYMBOLS
+#include "WinResrc.h"
+#undef APSTUDIO_READONLY_SYMBOLS
+
+#include "../src/Version.h"
+
+#define ___FULL_VERSION_STR___(X) #X
+#define __FULL_VERSION_STR__(X,Y,Z) ___FULL_VERSION_STR___(X.Y##Z)
+#define _FULL_VERSION_STR_(X,Y,Z) __FULL_VERSION_STR__(X,Y,Z)
+#define FULL_VERSION_STR _FULL_VERSION_STR_(VERSION_MAJOR,VERSION_MINOR_HI,VERSION_MINOR_LO)
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Neutral resources
+//
+#ifdef _WIN32
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+#pragma code_page(1252)
+#endif //_WIN32
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+101 ICON "appicon.ico"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Version
+//
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    VERSION_MAJOR, VERSION_MINOR_HI, VERSION_MINOR_LO, 0
+ PRODUCTVERSION VERSION_MAJOR, VERSION_MINOR_HI, VERSION_MINOR_LO, 0
+ FILEFLAGSMASK 0x17L
+#ifdef _DEBUG
+ FILEFLAGS 0x3L
+#else
+ FILEFLAGS 0x2L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "000004b0"
+        BEGIN
+            VALUE "ProductName",      "TimedExec"
+            VALUE "FileDescription",  "TimedExec"
+            VALUE "ProductVersion",   FULL_VERSION_STR
+            VALUE "FileVersion",      FULL_VERSION_STR
+            VALUE "InternalName",     "TimedExec"
+            VALUE "OriginalFilename", "TimedExec.exe"
+            VALUE "LegalCopyright",   "Created by LoRd_MuldeR <MuldeR2@GMX.de>"
+            VALUE "CompanyName",      "Muldersoft"
+            VALUE "LegalTrademarks",  "Muldersoft"
+            VALUE "Comments",         "Released under the GNU General Public License"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0, 1200
+    END
+END
