@@ -113,7 +113,7 @@ copy "%~dp0\bin\Win32\Release\TimedExec.exe" "%PACK_PATH%\TimedExec-x86.exe"
 copy "%~dp0\bin\x64\.\Release\TimedExec.exe" "%PACK_PATH%\TimedExec-x64.exe"
 copy "%~dp0\LICENSE.html"                    "%PACK_PATH%"
 
-"%PDOC_PATH%\pandoc.exe" --from markdown_github+pandoc_title_block+header_attributes+implicit_figures+inline_notes --to html5 --toc -N --metadata title="TimedExec" --standalone -H "%~dp0\..\Prerequisites\Pandoc\css\github-pandoc.inc" "README.md" | "%JAVA_HOME%\bin\java.exe" -jar "%~dp0\..\Prerequisites\HTMLCompressor\bin\htmlcompressor-1.5.3.jar" --compress-css -o "%PACK_PATH%\README.html"
+"%PDOC_PATH%\pandoc.exe" --from markdown_github+pandoc_title_block+header_attributes+implicit_figures+inline_notes --to html5 -N --metadata title="TimedExec" --standalone -H "%~dp0\..\Prerequisites\Pandoc\css\github-pandoc.inc" "README.md" | "%JAVA_HOME%\bin\java.exe" -jar "%~dp0\..\Prerequisites\HTMLCompressor\bin\htmlcompressor-1.5.3.jar" --compress-css -o "%PACK_PATH%\README.html"
 
 mkdir "%PACK_PATH%\img"
 mkdir "%PACK_PATH%\img\timedexec"
