@@ -34,7 +34,12 @@
 #define WIN32_LEAN_AND_MEAN 1
 #include <Windows.h>
 #include <ShellAPI.h>
-#include <Shlwapi.h>
+
+#if _WIN32_WINNT >= 0x0603
+#  include <timeapi.h>
+#else
+#  include <MMSystem.h>
+#endif
 
 #define DEFAULT_EXEC_LOOPS 5
 #define DEFAULT_WARMUP_LOOPS 1
@@ -42,9 +47,9 @@
 #define ENABLE_ENV_VARS true
 
 #ifdef _UNICODE
-#define tstring std::wstring
+#  define tstring std::wstring
 #else
-#define tstring std::string
+#  define tstring std::string
 #endif
 
 static HANDLE g_hAbortEvent = NULL;
@@ -88,10 +93,49 @@ static const char *printClockType(const clock_type_t clock_type)
 	return "N/A";
 }
 
+static bool setTimerResolution(UINT& period)
+{
+	TIMECAPS timecaps;
+	if (timeGetDevCaps(&timecaps, sizeof(TIMECAPS)) == MMSYSERR_NOERROR)
+	{
+		if (timeBeginPeriod(timecaps.wPeriodMin) == MMSYSERR_NOERROR)
+		{
+			period = timecaps.wPeriodMin;
+			return true;
+		}
+	}
+	period = MAXUINT;
+	return false;
+}
+
+static void resetTimerResolution(const UINT period)
+{
+	if (period != MAXUINT)
+	{
+		timeEndPeriod(period);
+	}
+}
+
+static tstring trim(const std::vector<_TCHAR> &buffer)
+{
+	std::vector<_TCHAR>::const_iterator left;
+	for (left = buffer.cbegin(); (left != buffer.cend()) && (*left <= 0x20); ++left);
+	if (left != buffer.cend())
+	{
+		std::vector<_TCHAR>::const_reverse_iterator right;
+		for (right = buffer.crbegin(); (right != buffer.crend()) && (*right <= 0x20); ++right);
+		if (right != buffer.crend())
+		{
+			return tstring(left, right.base());
+		}
+	}
+	return tstring();
+}
+
 static bool getEnvVariable(const _TCHAR *const name, tstring &value)
 {
-	std::vector<TCHAR> buffer;
-
+	std::vector<_TCHAR> buffer(MAX_PATH);
+	value.clear();
 	for (int i = 0; i < 3; ++i)
 	{
 		const DWORD result = GetEnvironmentVariable(name, buffer.data(), (DWORD)buffer.size());
@@ -99,19 +143,26 @@ static bool getEnvVariable(const _TCHAR *const name, tstring &value)
 		{
 			break; /*failed*/
 		}
-		if (result > buffer.size())
+		else if (result > buffer.size())
 		{
-			buffer.resize(result); /*adjust buffer*/
+			buffer.resize(result);
 		}
 		else if (result < buffer.size())
 		{
-			value = tstring(buffer.data());
+			value = trim(buffer);
 			return true;
 		}
 	}
-
-	value.clear();
 	return false;
+}
+
+static bool parseFlag(const tstring &value)
+{
+	if ((!_tcsicmp(value.c_str(), _T("yes"))) || (!_tcsicmp(value.c_str(), _T("true"))))
+	{
+		return true;
+	}
+	return (_tcstol(value.c_str(), NULL, 10) > 0L);
 }
 
 static ULONGLONG fileTimeToU64(const PFILETIME fileTime)
@@ -170,8 +221,7 @@ static bool checkBinary(const tstring &filePath)
 
 static tstring getFullPath(const _TCHAR *const fileName)
 {
-	std::vector<TCHAR> buffer;
-
+	std::vector<TCHAR> buffer(MAX_PATH);
 	for (int i = 0; i < 3; ++i)
 	{
 		const DWORD result = GetFullPathName(fileName, (DWORD)buffer.size(), buffer.data(), NULL);
@@ -179,32 +229,33 @@ static tstring getFullPath(const _TCHAR *const fileName)
 		{
 			break; /*failed*/
 		}
-		if (result > buffer.size())
+		else if (result > buffer.size())
 		{
-			buffer.resize(result); /*adjust buffer*/
+			buffer.resize(result);
 		}
 		else if (result < buffer.size())
 		{
-			return tstring(buffer.data());
+			return tstring(buffer.begin(), buffer.end());
 		}
 	}
-
 	return tstring(fileName);
 }
 
 static tstring getFileNameOnly(const tstring &filePath)
 {
-	TCHAR *buffer = _tcsdup(filePath.c_str());
-	if (!buffer)
+	for (tstring::const_reverse_iterator iter = filePath.crbegin(); iter != filePath.crend(); ++iter)
 	{
-		return tstring();
+		if ((*iter == _T('/')) || (*iter == _T('\\')))
+		{
+			tstring::const_iterator offset = iter.base();
+			if (offset != filePath.cend())
+			{
+				return tstring(offset, filePath.cend());
+			}
+			return tstring();
+		}
 	}
-
-	PathStripPath(buffer);
-
-	const tstring result(buffer);
-	free(buffer);
-	return result;
+	return filePath;
 }
 
 static double computeMedian(std::vector<double> &data)
@@ -224,6 +275,25 @@ static double computeMedian(std::vector<double> &data)
 		: data[center];
 }
 
+static void appendStr(tstring &commandLine, const tstring &token)
+{
+	for (tstring::const_iterator iter = token.cbegin(); iter != token.cend(); ++iter)
+	{
+		if (*iter)
+		{
+			if (*iter == _T('"'))
+			{
+				commandLine += _T('\\');
+			}
+			commandLine += *iter;
+		}
+		else
+		{
+			break;
+		}
+	}
+}
+
 static int initializeCommandLine(tstring &commandLine, tstring &programFile)
 {
 	commandLine.clear();
@@ -240,7 +310,6 @@ static int initializeCommandLine(tstring &commandLine, tstring &programFile)
 	for(int i = 1; i < nArgs; i++)
 	{
 		tstring token;
-
 		if (i > 1)
 		{
 			token = tstring(szArglist[i]);
@@ -249,17 +318,16 @@ static int initializeCommandLine(tstring &commandLine, tstring &programFile)
 		else
 		{
 			token = getFullPath(szArglist[i]);
-			programFile += token;
+			programFile = token;
 		}
-
-		if (token.find(' ') == tstring::npos)
+		if (token.find(_T(' ')) == tstring::npos)
 		{
-			commandLine += token;
+			appendStr(commandLine, token);
 		}
 		else
 		{
 			commandLine += _T('"');
-			commandLine += token;
+			appendStr(commandLine, token);
 			commandLine += _T('"');
 		}
 	}
@@ -268,14 +336,14 @@ static int initializeCommandLine(tstring &commandLine, tstring &programFile)
 	return nArgs;
 }
 
-static bool createProcess(const tstring &commandLine, HANDLE &hThrd, HANDLE &hProc, const bool suspended = false)
+static bool createProcess(const tstring &commandLine, HANDLE &hThrd, HANDLE &hProc, const bool highPriority = false)
 {
 	STARTUPINFO startInfo;
 	SecureZeroMemory(&startInfo, sizeof(STARTUPINFO));
 	PROCESS_INFORMATION processInfo;
 	SecureZeroMemory(&processInfo, sizeof(PROCESS_INFORMATION));
 
-	if (!CreateProcess(NULL, (LPTSTR)commandLine.c_str(), NULL, NULL, false, HIGH_PRIORITY_CLASS | (suspended ? CREATE_SUSPENDED : 0), NULL, NULL, &startInfo, &processInfo))
+	if (!CreateProcess(NULL, (LPTSTR)commandLine.c_str(), NULL, NULL, false, highPriority ? HIGH_PRIORITY_CLASS : 0U, NULL, NULL, &startInfo, &processInfo))
 	{
 		return false;
 	}
@@ -308,8 +376,7 @@ static int getProcessExitCode(const HANDLE &hProc)
 	{
 		return *reinterpret_cast<int*>(&exitCode);
 	}
-
-	return 0;
+	return -1;
 }
 
 static void abortedHandlerRoutine(const HANDLE &hProc)
@@ -351,8 +418,11 @@ static LONG WINAPI crashHandlerRoutine(struct _EXCEPTION_POINTERS *ExceptionInfo
 // MAIN FUNCTION
 // =============================================================================================================
 
+#define PROCESS_FAILED() do { CloseHandle(hThrd); CloseHandle(hProc); goto cleanup; } while (0)
+
 static int timedExecMain(int argc, _TCHAR* argv[])
 {
+	int exitCode = EXIT_FAILURE;
 	std::ios initFmt(NULL);
 	initFmt.copyfmt(std::cerr);
 
@@ -379,7 +449,9 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 		std::cerr << "  TIMED_EXEC_PASSES        - Number of execution passes (default: " << DEFAULT_EXEC_LOOPS << ")" << std::endl;
 		std::cerr << "  TIMED_EXEC_WARMUP_PASSES - Number of warm-up passes (default: " << DEFAULT_WARMUP_LOOPS << ")" << std::endl;
 		std::cerr << "  TIMED_EXEC_LOGFILE       - Log-File Name (default: \"" << DEFAULT_LOGFILE << "\")" << std::endl;
-		std::cerr << "  TIMED_EXEC_NO_CHECKS     - Set this to *disable* exit code checks" << std::endl;
+		std::cerr << "  TIMED_EXEC_NO_CHECKS     - Do *not* check the process exit codes" << std::endl;
+		std::cerr << "  TIMED_EXEC_NO_PRIORITY   - Do *not* adjust the process priorities" << std::endl;
+		std::cerr << "  TIMED_EXEC_NO_PERIOD     - Do *not* adjust system timer period" << std::endl;
 		std::cerr << "  TIMED_EXEC_CLOCK_TYPE    - The type of clock used for measurements\n" << std::endl;
 		return EXIT_FAILURE;
 	}
@@ -401,9 +473,9 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	/* ---------------------------------------------------------- */
 
 	tstring logFile(getFullPath(_T(DEFAULT_LOGFILE)));
-	int maxPasses = DEFAULT_EXEC_LOOPS, maxWarmUpPasses = DEFAULT_WARMUP_LOOPS;
-	bool checkExitCodes = true;
 	clock_type_t clock_type = CLOCK_WALLCLOCK;
+	int maxPasses = DEFAULT_EXEC_LOOPS, maxWarmUpPasses = DEFAULT_WARMUP_LOOPS;
+	bool checkExitCodes = true, adjustPriority = true, adjustPeriod = true;
 
 	if (ENABLE_ENV_VARS)
 	{
@@ -422,14 +494,21 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 		}
 		if (getEnvVariable(_T("TIMED_EXEC_NO_CHECKS"), temp))
 		{
-			checkExitCodes = (_tstoi(temp.c_str()) == 0);
+			checkExitCodes = (!parseFlag(temp));
+		}
+		if (getEnvVariable(_T("TIMED_EXEC_NO_PRIORITY"), temp))
+		{
+			adjustPriority = (!parseFlag(temp));
+		}
+		if (getEnvVariable(_T("TIMED_EXEC_NO_PERIOD"), temp))
+		{
+			adjustPeriod = (!parseFlag(temp));
 		}
 		if (getEnvVariable(_T("TIMED_EXEC_CLOCK_TYPE"), temp))
 		{
 			if (!parseClockType(temp, clock_type))
 			{
-				_ftprintf(stderr, _T("Specified clock type \"%s\" is unsupported.\nPlease see the documentation for a list of supported clock types!\n\n"), temp.c_str());
-				return EXIT_FAILURE;
+				_ftprintf(stderr, _T("WARNING: Specified clock type \"%s\" is unsupported. Using default clock type!\n\n"), temp.c_str());
 			}
 		}
 	}
@@ -442,9 +521,22 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	_ftprintf(stderr, _T("Log File:\n%s\n\n"), logFile.c_str());
 	std::cerr << "Warm-Up / Metering passes: " << maxWarmUpPasses << "x / " << maxPasses << 'x' << std::endl;
 
-	if (!SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS))
+	if (adjustPriority)
 	{
-		std::cerr << "\nWARNING: Failed to set process priroity class!" << std::endl;
+		if (!SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS))
+		{
+			std::cerr << "\nWARNING: Failed to adjust process priroity class!" << std::endl;
+		}
+	}
+
+	UINT timerPeriod = MAXUINT;
+	if (adjustPeriod)
+	{
+		if (!setTimerResolution(timerPeriod))
+		{
+			std::cerr << "\nWARNING: Failed to adjust timer period!" << std::endl;
+
+		}
 	}
 
 	std::vector<double> stats_samples(maxPasses, 0.0);
@@ -466,29 +558,29 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 
 		HANDLE hThrd, hProc;
 
-		if (!createProcess(commandLine, hThrd, hProc))
+		if (!createProcess(commandLine, hThrd, hProc, adjustPriority))
 		{
 			std::cerr << "\n\nSYSTEM ERROR: Failed to create process!\n" << std::endl;
-			return EXIT_FAILURE;
+			goto cleanup;
 		}
 
 		if (!waitForProcess(hProc))
 		{
 			std::cerr << "\n\nSYSTEM ERROR: Failed to wait for process termination!\n" << std::endl;
-			return EXIT_FAILURE;
+			PROCESS_FAILED();
 		}
 
 		if (g_aborted)
 		{
 			abortedHandlerRoutine(hProc);
-			return EXIT_FAILURE;
+			PROCESS_FAILED();
 		}
 
 		const int exitCode = getProcessExitCode(hProc);
 		if (checkExitCodes && (exitCode != 0))
 		{
 			std::cerr << "\n\nPROGRAM ERROR: Abnormal program termination detected! (Exit Code: " << exitCode << ")\n" << std::endl;
-			return EXIT_FAILURE;
+			PROCESS_FAILED();
 		}
 		else
 		{
@@ -511,36 +603,29 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 
 		HANDLE hThrd, hProc;
 
-		if (!createProcess(commandLine, hThrd, hProc, true))
+		if (!createProcess(commandLine, hThrd, hProc, adjustPriority))
 		{
 			std::cerr << "\n\nSYSTEM ERROR: Failed to create process!\n" << std::endl;
-			return EXIT_FAILURE;
-		}
-
-		if (ResumeThread(hThrd) == ((DWORD) -1))
-		{
-			std::cerr << "\n\nSYSTEM ERROR: Failed to resume child process!\n" << std::endl;
-			TerminateProcess(hProc, UINT(-1));
-			return EXIT_FAILURE;
+			goto cleanup;
 		}
 		
 		if (!waitForProcess(hProc))
 		{
 			std::cerr << "\n\nSYSTEM ERROR: Failed to wait for process termination!\n" << std::endl;
-			return EXIT_FAILURE;
+			PROCESS_FAILED();
 		}
 
 		if (g_aborted)
 		{
 			abortedHandlerRoutine(hProc);
-			return EXIT_FAILURE;
+			PROCESS_FAILED();
 		}
 
 		const int exitCode = getProcessExitCode(hProc);
 		if (checkExitCodes && (exitCode != 0))
 		{
 			std::cerr << "\n\nPROGRAM ERROR: Abnormal program termination detected! (Exit Code: " << exitCode << ")\n" << std::endl;
-			return EXIT_FAILURE;
+			PROCESS_FAILED();
 		}
 		else
 		{
@@ -635,7 +720,11 @@ static int timedExecMain(int argc, _TCHAR* argv[])
 	/* Goodbye!                                                   */
 	/* ---------------------------------------------------------- */
 
-	return EXIT_SUCCESS;
+	exitCode = EXIT_SUCCESS;
+
+cleanup:
+	resetTimerResolution(timerPeriod);
+	return exitCode;
 }
 
 // =============================================================================================================

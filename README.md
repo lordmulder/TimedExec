@@ -18,7 +18,7 @@ Usage Instructions
 
 ```
 ===============================================================================
-Timed Exec - Benchmarking Utility, Version 1.05
+Timed Exec - Benchmarking Utility, Version 1.06
 Copyright (c) 2023 LoRd_MuldeR <mulder2@gmx.de>. Some rights reserved.
 
 This program is free software: you can redistribute it and/or modify
@@ -33,7 +33,9 @@ Influential environment variables:
   TIMED_EXEC_PASSES        - Number of execution passes (default: 5)
   TIMED_EXEC_WARMUP_PASSES - Number of warm-up passes (default: 1)
   TIMED_EXEC_LOGFILE       - Log-File Name (default: "TimedExec.log")
-  TIMED_EXEC_NO_CHECKS     - Set this to *disable* exit code checks
+  TIMED_EXEC_NO_CHECKS     - Do *not* check the process exit codes
+  TIMED_EXEC_NO_PRIORITY   - Do *not* adjust the process priorities
+  TIMED_EXEC_NO_PERIOD     - Do *not* adjust system timer period
   TIMED_EXEC_CLOCK_TYPE    - The type of clock used for measurements
 ```
 

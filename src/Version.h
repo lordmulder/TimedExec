@@ -24,6 +24,6 @@
 
 #define VERSION_MAJOR    1
 #define VERSION_MINOR_HI 0
-#define VERSION_MINOR_LO 5
+#define VERSION_MINOR_LO 6
 
 #endif
