@@ -4,9 +4,9 @@ by LoRd_MuldeR &lt;<mulder2@gmx>&gt; | <http://muldersoft.com/>
 Introduction
 ============
 
-**TimedExec** is a small utility for *benchmarking* command-line programs. It will *execute* the specified program with the specified command-line arguments and then *measure* the time that it takes for the execution to complete. In order to obtain *accurate* results, all measurements are implemented via *high-resolution* performance timers. And, since program execution times unavoidably are subject to certain variations (e.g. due to environmental noise), each test will be repeated *multiple* times. The number of metering passes can be configured as desired. Optionally, a number of "warm-up" passes can be performed *prior to* the first metering pass. The warm-up passes prevent caching effects from interfering with the execution times.
+**TimedExec** is a small utility for *benchmarking* programs. It will *execute* the specified program with the specified command-line arguments and *measure* the time that it takes for the execution to complete. Because the execution time of a program unavoidably is subject to certain variations (e.g. due to environmental noise), each measurement will be repeated *multiple* times. The number of metering passes can be configured as desired. Optionally, a number of “warm-up” passes can be performed *prior to* the metering passes. The warm-up passes prevent caching effects from interfering with the measurement.
 
-TimedExec will then compute the ***mean*** execution time as well as the ***median*** execution time of all metering passes. It will also record the *fastest* and *slowest* execution time that has been measured. Furthermore, TimedExec computes the *standard error* in order to determine [***confidence intervals***](http://www.uni-siegen.de/phil/sozialwissenschaften/soziologie/mitarbeiter/ludwig-mayerhofer/statistik/statistik_downloads/konfidenzintervalle.pdf) from the benchmarking results. These are the *ranges* which contain the program's “real” average execution time (expected value), *with very high probability*. All results will be saved to a log file.
+Once all metering passes have been completed, TimedExec will compute the ***mean*** execution time as well as the ***median*** execution time of the program. It will also record the *fastest* and *slowest* execution time that has been observed. Furthermore, TimedExec computes the *standard error*, in order to determine [***confidence intervals***](http://www.uni-siegen.de/phil/sozialwissenschaften/soziologie/mitarbeiter/ludwig-mayerhofer/statistik/statistik_downloads/konfidenzintervalle.pdf) from the benchmarking results.
 
 
 Usage Instructions
@@ -58,7 +58,6 @@ In the following example we use *TimedExec* to benchmark the program **`ping.exe
 TimedExec.exe C:\Windows\System32\ping.exe -n 12 www.google.com
 ```
 
-
 Results
 =======
 
@@ -83,11 +82,16 @@ Active Clock Type       : WALLCLOCK (0)
 Interpretation
 --------------
 
-When comparing measurement results, the ***mean*** (average) execution time may seem like the most obvious choice. However, it has to be noted that the *mean* of a data sample is highly sensitive to “outliers” and therefore can be misleading! This is especially true, when there exists a lot of variation in the data sample. Consequently, comparing the ***median*** execution times often is the better choice. That is because the *median* of a data sample is much more robust against outliers.
+When comparing measurement results, the [***mean***](https://en.wikipedia.org/wiki/Arithmetic_mean) (average) execution time may seem like the most obvious choice. However, it has to be noted that the *mean* of a data sample is highly sensitive to “outliers” and therefore can be misleading! This is especially true, when there exists a lot of variation in the data sample. Consequently, comparing the [***median***](https://en.wikipedia.org/wiki/Median) of the execution times often is the better choice. That is because the *median* of a data sample is much more robust against outliers.
 
-Furthermore, it is important to keep in mind that the *mean* (or *median*) execution time computed from a limited number of metering passes only yields an ***estimate*** of the program's “real” average execution time (expected value). The “real” value can only be determined accurately from an *infitinte* number of metering passes &ndash; which is **not** possible in practice. In this situation, we can have a look at the ***confidence intervals***. These intervals contain the “real” value, *with very high probability*. The most commonly used *confidence interval* is the “95%” one (higher confidence means broader interval, and vice versa).
+Furthermore, it is important to keep in mind that the *mean* (or *median*) execution time computed from a limited number of metering passes only yields an ***estimate*** of the program's “real” average execution time (expected value). The “real” value can only be determined accurately from an *infitinte* number of metering passes &ndash; which is **not** possible in practice. In this situation, we can have a look at the [***confidence intervals***](http://www.uni-siegen.de/phil/sozialwissenschaften/soziologie/mitarbeiter/ludwig-mayerhofer/statistik/statistik_downloads/konfidenzintervalle.pdf). These intervals contain the “real” value, *with very high probability*. The most commonly used *confidence interval* is the “95%” one. Higher confidence means broader interval, and vice versa.
 
-Simply put, as long as the confidence intervals of program A and program B *overlap* (at least partially), we **must not** conclude that either of these programs runs faster (or slower) in the average case. ***No*** conclusion can be drawn in that case!
+Simply put, as long as the confidence intervals of the runtime of program “A” and the runtime of program “B” *overlap*, we **must not** conclude that either of these programs runs faster (or slower). In fact, **no** real conclusion can be drawn in that case!
+
+Limitations
+-----------
+
+This tools measures the runtime of *processes*. Because creating a process has a certain overhead, and because the system timer has a limited precision &ndash; usually in the range of a few milliseconds, but can be worse &ndash; this tool is **not** suitable for benchmarking programs or functions with *very short* runtime! The process to be measured should run *at least* for a couple of seconds, in order to get useful benchmark results. If you need to benchmark functions with *very short* runtime, it is recommended to use [*high-precision timers*](https://learn.microsoft.com/en-us/windows/win32/api/profileapi/nf-profileapi-queryperformancecounter) directly inside your program code, rather than launching separate processes.
 
 
 Sources
@@ -95,10 +99,10 @@ Sources
 
 The *TimedExec* source codes are managed by [**Git**](http://git-scm.com/doc) and are available from one of the official  mirrors:
 
-* <tt>https://github.com/lordmulder/TimedExec.git</tt> ([Browse](https://github.com/lordmulder/TimedExec))
-* <tt>https://bitbucket.org/muldersoft/timedexec.git</tt> ([Browse](https://bitbucket.org/muldersoft/timedexec))
-* <tt>https://gitlab.com/timedexec/timedexec.git</tt> ([Browse](https://gitlab.com/timedexec/timedexec))
-
+* `https://github.com/lordmulder/TimedExec.git` ([Browse](https://github.com/lordmulder/TimedExec))
+* `https://bitbucket.org/muldersoft/timedexec.git` ([Browse](https://bitbucket.org/muldersoft/timedexec))
+* `https://gitlab.com/timedexec/timedexec.git` ([Browse](https://gitlab.com/timedexec/timedexec))
+* `https://punkindrublic.mooo.com:3000/Muldersoft/TimedExec.git` ([Browse](https://punkindrublic.mooo.com:3000/Muldersoft/TimedExec))
 
 License
 =======
